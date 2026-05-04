@@ -1,0 +1,51 @@
+{
+  "version": "2.0",
+  "project_name": "VidAPI",
+  "description": "Self-hosted Python FastAPI service that replicates Creatomate/JSON2Video behavior - accepts JSON timeline compositions and renders video via FFmpeg",
+  "current_phase": 0,
+  "current_session": null,
+  "monorepo": false,
+  "phases": {
+    "0": {
+      "name": "Foundation",
+      "description": "Prove the core JSON-to-video loop locally with FastAPI, Pydantic schema, Editly renderer, and synchronous render service",
+      "status": "in_progress",
+      "session_count": 5
+    },
+    "1": {
+      "name": "Async Jobs and Multi-track",
+      "status": "not_started",
+      "session_count": 0
+    },
+    "2": {
+      "name": "Templates and Polish",
+      "status": "not_started",
+      "session_count": 0
+    },
+    "3": {
+      "name": "Production Hardening",
+      "status": "not_started",
+      "session_count": 0
+    },
+    "4": {
+      "name": "Advanced Rendering",
+      "status": "not_started",
+      "session_count": 0
+    }
+  },
+  "completed_sessions": [
+    "phase00-session01-project-skeleton-and-config"
+  ],
+  "next_session_history": [
+    {
+      "date": "2026-05-05",
+      "session": "phase00-session01-project-skeleton-and-config",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase00-session01-project-skeleton-and-config",
+      "status": "completed"
+    }
+  ]
+}
