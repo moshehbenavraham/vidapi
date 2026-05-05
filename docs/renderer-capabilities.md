@@ -9,15 +9,14 @@ work.
 
 | Request renderer | Selected renderer | Behavior |
 |------------------|-------------------|----------|
-| omitted | `editly` | Default MVP renderer. |
-| `null` | `editly` | Treated the same as omitted. |
-| `auto` | `editly` | Selects the best available renderer; currently Editly. |
+| omitted | `hyperframes` or `editly` | HyperFrames when an HTML asset is present; otherwise Editly. |
+| `null` | `hyperframes` or `editly` | Treated the same as omitted. |
+| `auto` | `hyperframes` or `editly` | HyperFrames when an HTML asset is present; otherwise Editly. |
 | `editly` | `editly` | Explicit Editly rendering. |
 | `ffmpeg-native` | `ffmpeg-native` | Explicit native FFmpeg rendering for the supported simple subset. |
-| `hyperframes` | none | Reserved for a future adapter; currently rejected. |
+| `hyperframes` | `hyperframes` | Explicit HTML/CSS/GSAP rendering; requires at least one HTML asset. |
 
-Unknown renderer names are rejected by request schema validation. Known but
-unavailable renderers are rejected by capability validation with a stable
+Unknown renderer names are rejected by capability validation with a stable
 VidAPI error envelope.
 
 ## Editly Support Matrix
@@ -54,6 +53,29 @@ generation. It consumes resolved local asset paths only. Unsupported native
 features such as transitions, captions, poster controls, transforms, audio
 effects, invalid colors, unresolved assets, and client-supplied filters are
 rejected before FFmpeg work.
+
+## HyperFrames Support Matrix
+
+| Feature | Supported values |
+|---------|------------------|
+| Asset types | `html`, `image`, `video`, `audio`, `text`, `color` |
+| Output formats | `mp4`, `webm`, `gif`, `png-sequence` |
+| HTML fields | bounded inline `html`, optional `css`, optional deterministic inline `script`, explicit `media_refs` |
+| Timing | absolute `start`, `length`, video/audio trim, volume, track z-order through HyperFrames `data-*` attributes |
+| Runtime | Node.js 22+, HyperFrames CLI, FFmpeg, Chromium/browser dependencies |
+| Captions | none at capability admission |
+| Poster controls | none at capability admission |
+| Transitions | none |
+| Remote scripts/styles | rejected |
+
+HyperFrames writes `index.html`, `compiled.hyperframes.json`, `replay.json`, and
+workspace-local media copies before invoking the CLI. It produces an MP4
+intermediate and relies on the shared finishing path for WebM, GIF, PNG
+sequence, storage, logs, metrics, webhooks, and default poster generation.
+
+The adapter does not fetch media from the browser. Media referenced by HTML
+assets must be listed in `media_refs`, resolved by VidAPI's asset service, and
+rewritten to local project paths during compile.
 
 ## Error Semantics
 

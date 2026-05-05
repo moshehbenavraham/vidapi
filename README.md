@@ -1,7 +1,8 @@
 # VidAPI
 
 Self-hosted Python FastAPI service for programmatic video rendering.
-Accepts JSON timeline compositions and renders video via Editly + FFmpeg.
+Accepts JSON timeline compositions and renders video via Editly, native FFmpeg,
+or HyperFrames for HTML-backed compositions.
 Also supports reusable templates, webhook callbacks, and deterministic render artifacts.
 A self-hosted, open-source alternative to Creatomate and JSON2Video.
 
@@ -24,7 +25,7 @@ bash scripts/smoke-test.sh
 
 This starts three services:
 - **api** (port 8000) -- FastAPI server accepting render requests
-- **worker** -- ARQ consumer with Editly/FFmpeg for rendering
+- **worker** -- ARQ consumer with Editly, HyperFrames, and FFmpeg for rendering
 - **redis** (port 6379) -- Job queue broker
 
 For a production-like local stack with API, worker, Redis AUTH, PostgreSQL, and
@@ -56,7 +57,7 @@ docker compose down -v        # Stop and remove volumes
 ## Quick Start (Local Development)
 
 ```bash
-# Prerequisites: Python 3.11+, Node.js 20+, FFmpeg 6+, Redis
+# Prerequisites: Python 3.11+, Node.js 22+, FFmpeg 6+, Redis
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 uvicorn app.main:app --reload
@@ -80,7 +81,7 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 20+ (for Editly renderer)
+- Node.js 22+ (for Editly and HyperFrames renderers)
 - FFmpeg 6+ and ffprobe
 - Bundled fonts: Inter, Noto Sans, DejaVu
 - Docker Engine 24+ and Docker Compose v2 (for containerized stack)
@@ -94,7 +95,7 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 |   |-- core/              # Config (pydantic-settings), logging, security
 |   |-- db/                # SQLModel tables, CRUD, async sessions
 |   |-- models/            # Pydantic composition, template, and render schemas
-|   |-- renderers/         # Renderer protocol, capability registry, Editly bridge, poster gen
+|   |-- renderers/         # Renderer protocol, capabilities, Editly, HyperFrames, FFmpeg
 |   |-- services/          # Render pipeline, asset, template, and webhook services
 |   |-- storage/           # Storage protocol and local filesystem adapter
 |   \-- workers/           # Background job workers (Phase 01)
@@ -153,10 +154,12 @@ Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
 ### Renderer Selection
 
 Render requests may omit `renderer`, set it to `auto`, explicitly request
-`editly`, or explicitly request `ffmpeg-native`. Omitted, `auto`, and `editly`
-select the Editly renderer. `ffmpeg-native` selects the constrained native
-FFmpeg adapter for simple high-throughput timelines. `hyperframes` remains a
-reserved but unavailable renderer name.
+`editly`, explicitly request `ffmpeg-native`, or explicitly request
+`hyperframes`. Omitted, `null`, and `auto` select HyperFrames when any clip uses
+`asset.type: "html"`; otherwise they select Editly. `ffmpeg-native` selects the
+constrained native FFmpeg adapter for simple high-throughput timelines.
+`hyperframes` compiles VidAPI HTML assets into a workspace-local HyperFrames
+project and produces an MP4 intermediate for shared finishing.
 
 VidAPI validates renderer capabilities before direct render jobs are persisted,
 queued, or compiled. Unsupported renderers return `UNSUPPORTED_RENDERER`.
@@ -165,7 +168,9 @@ with bounded context. See
 [Renderer Capabilities](docs/renderer-capabilities.md) for the support matrix
 and extension contract. See
 [Native FFmpeg Renderer](docs/native-ffmpeg-renderer.md) for the native subset,
-replay artifacts, and rejection behavior.
+replay artifacts, and rejection behavior. See
+[HyperFrames Renderer](docs/hyperframes-renderer.md) for HTML asset boundaries,
+runtime dependencies, and replay artifacts.
 
 ### Transitions
 
@@ -209,8 +214,8 @@ constraints, and renderer support notes.
 
 ### Output Formats And Presets
 
-`output.format` supports `mp4`, `webm`, `gif`, and `png-sequence`. Editly and
-the native FFmpeg renderer both produce deterministic MP4 intermediates; WebM,
+`output.format` supports `mp4`, `webm`, `gif`, and `png-sequence`. Editly,
+HyperFrames, and the native FFmpeg renderer all produce MP4 intermediates; WebM,
 GIF, and PNG sequence outputs are finished with FFmpeg before storage. PNG
 sequence downloads are zip archives and expose `manifest.json` through the
 render artifact endpoint.
@@ -291,6 +296,7 @@ and a `Retry-After` header.
 - [Development Guide](docs/development.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Renderer Capabilities](docs/renderer-capabilities.md)
+- [HyperFrames Renderer](docs/hyperframes-renderer.md)
 - [Transitions](docs/transitions.md)
 - [Output Formats](docs/output-formats.md)
 - [Captions and Posters](docs/captions-and-posters.md)
@@ -307,6 +313,7 @@ and a `Retry-After` header.
 - **SQLModel + aiosqlite/asyncpg** - Async database (SQLite dev, PostgreSQL prod)
 - **Alembic** - Database migrations
 - **Editly** - Default video renderer (Node.js subprocess)
+- **HyperFrames** - HTML/CSS/GSAP renderer adapter (Node.js subprocess)
 - **FFmpeg** - Video encoding, poster extraction, audio mixing, media probing
 - **Pillow** - Text-to-image rendering with bundled fonts
 - **Jinja2** - Sandboxed template expansion for reusable compositions
@@ -316,7 +323,7 @@ and a `Retry-After` header.
 
 ## Project Status
 
-Phases 00, 01, 02, and 03 are complete; Phase 04 is not started. See
+Phases 00, 01, 02, and 03 are complete; Phase 04 is in progress. See
 [PRD](.spec_system/PRD/PRD.md) for current progress and roadmap.
 
 | Phase | Name | Status |

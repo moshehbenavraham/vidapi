@@ -225,6 +225,14 @@ class Settings(BaseSettings):
     editly_timeout_seconds: int = Field(default=600, ge=1, le=86_400)
     editly_fast_mode: bool = False
 
+    hyperframes_bin: str = "hyperframes"
+    hyperframes_timeout_seconds: int = Field(default=600, ge=1, le=86_400)
+    hyperframes_workers: int = Field(default=1, ge=1, le=8)
+    max_html_asset_bytes: int = Field(default=262_144, ge=1_024, le=2_097_152)
+    max_html_css_bytes: int = Field(default=65_536, ge=0, le=1_048_576)
+    max_html_script_bytes: int = Field(default=65_536, ge=0, le=1_048_576)
+    max_html_media_refs: int = Field(default=32, ge=0, le=1_000)
+
     ffmpeg_bin: str = "ffmpeg"
     audio_mix_timeout_seconds: int = Field(default=120, ge=1, le=3600)
     output_postprocess_timeout_seconds: int = Field(default=120, ge=1, le=3600)

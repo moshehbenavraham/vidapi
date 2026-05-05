@@ -167,9 +167,9 @@ FFMPEG_NATIVE_CAPABILITY = RendererCapability(
 
 HYPERFRAMES_CAPABILITY = RendererCapability(
     name=HYPERFRAMES_RENDERER,
-    available=False,
-    asset_types=frozenset(),
-    output_formats=frozenset(),
+    available=True,
+    asset_types=frozenset({"video", "image", "text", "audio", "color", "html"}),
+    output_formats=supported_output_formats(),
     transitions=frozenset(),
 )
 
@@ -201,14 +201,21 @@ def known_renderer_names() -> tuple[str, ...]:
     return tuple(sorted(RENDERER_CAPABILITIES))
 
 
-def select_renderer(requested_renderer: str | None) -> RendererSelection:
+def select_renderer(
+    requested_renderer: str | None,
+    *,
+    composition: Composition | None = None,
+) -> RendererSelection:
     """Resolve a request renderer value to an available renderer."""
     requested = _safe_value(requested_renderer)
-    selected: str = (
-        DEFAULT_RENDERER
-        if requested is None or requested == AUTO_RENDERER
-        else requested
-    )
+    if requested is None or requested == AUTO_RENDERER:
+        selected = (
+            HYPERFRAMES_RENDERER
+            if composition is not None and composition_has_html_asset(composition)
+            else DEFAULT_RENDERER
+        )
+    else:
+        selected = requested
 
     capability = RENDERER_CAPABILITIES.get(selected)
     if capability is None:
@@ -225,9 +232,20 @@ def select_renderer(requested_renderer: str | None) -> RendererSelection:
 
 def validate_renderer_capabilities(composition: Composition) -> RendererSelection:
     """Validate that the selected renderer can handle the composition."""
-    selection = select_renderer(composition.renderer)
+    selection = select_renderer(composition.renderer, composition=composition)
     capability = selection.capability
     issues: list[RendererFeatureIssue] = []
+
+    if selection.renderer == HYPERFRAMES_RENDERER and not composition_has_html_asset(
+        composition
+    ):
+        issues.append(
+            RendererFeatureIssue(
+                feature="timeline.html_asset",
+                requested="absent",
+                supported=("required",),
+            )
+        )
 
     _append_issue_if_unsupported(
         issues,
@@ -299,6 +317,15 @@ def validate_renderer_capabilities(composition: Composition) -> RendererSelectio
         raise UnsupportedRendererFeatureError(selection.renderer, issues)
 
     return selection
+
+
+def composition_has_html_asset(composition: Composition) -> bool:
+    """Return whether any timeline clip contains an HTML asset."""
+    for track in composition.timeline.tracks:
+        for clip in track.clips:
+            if clip.asset.type == "html":
+                return True
+    return False
 
 
 def _append_issue_if_unsupported(

@@ -33,7 +33,7 @@
     "4": {
       "name": "Advanced Rendering",
       "description": "Renderer capability validation, advanced output formats and presets, captions and poster controls, additional transitions, native FFmpeg subset, and HyperFrames adapter",
-      "status": "in_progress",
+      "status": "complete",
       "session_count": 6
     }
   },
@@ -63,6 +63,8 @@
     "phase04-session03-captions-and-poster-customization",
     "phase04-session04-advanced-transitions-and-feature-validation",
     "phase04-session05-native-ffmpeg-renderer-subset"
+    ,
+    "phase04-session06-hyperframes-renderer-adapter"
   ],
   "next_session_history": [
     {
@@ -418,6 +420,21 @@
     {
       "date": "2026-05-05",
       "session": "phase04-session05-native-ffmpeg-renderer-subset",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session06-hyperframes-renderer-adapter",
+      "status": "planned"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session06-hyperframes-renderer-adapter",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session06-hyperframes-renderer-adapter",
       "status": "completed"
     }
   ]

@@ -11,6 +11,7 @@ from app.renderers.base import (
 from app.renderers.capabilities import (
     DEFAULT_RENDERER,
     FFMPEG_NATIVE_RENDERER,
+    HYPERFRAMES_RENDERER,
     RENDERER_CAPABILITIES,
     RendererCapability,
     RendererCapabilityError,
@@ -24,12 +25,14 @@ from app.renderers.capabilities import (
     validate_renderer_capabilities,
 )
 from app.renderers.editly import EditlyRenderer
+from app.renderers.hyperframes import HyperFramesRenderer
 from app.renderers.native_ffmpeg import NativeFfmpegRenderer
 from app.renderers.poster import PosterError, generate_poster
 
 _RENDERER_REGISTRY: dict[str, type[RendererProtocol]] = {
     DEFAULT_RENDERER: EditlyRenderer,
     FFMPEG_NATIVE_RENDERER: NativeFfmpegRenderer,
+    HYPERFRAMES_RENDERER: HyperFramesRenderer,
 }
 
 
@@ -50,10 +53,12 @@ def get_renderer(name: str | None = None) -> RendererProtocol:
 __all__ = [
     "DEFAULT_RENDERER",
     "FFMPEG_NATIVE_RENDERER",
+    "HYPERFRAMES_RENDERER",
     "RENDERER_CAPABILITIES",
     "CompileError",
     "CompiledRender",
     "EditlyRenderer",
+    "HyperFramesRenderer",
     "NativeFfmpegRenderer",
     "PosterError",
     "RenderArtifact",

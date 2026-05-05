@@ -13,6 +13,7 @@ from app.models.composition import (
     Composition,
     CoordinatePosition,
     FitMode,
+    HtmlAsset,
     ImageAsset,
     NamedPosition,
     Offset,
@@ -103,10 +104,55 @@ class TestAssetDiscrimination:
         assert isinstance(clip.asset, ColorAsset)
         assert clip.asset.type == "color"
 
+    def test_html_asset(self) -> None:
+        clip = Clip(
+            asset={
+                "type": "html",
+                "html": '<div class="title">Hello</div>',
+                "css": ".title { color: white; }",
+                "script": "tl.to('.title', { opacity: 1, duration: 0.2 });",
+            },
+            length=3.0,
+        )
+        assert isinstance(clip.asset, HtmlAsset)
+        assert clip.asset.type == "html"
+
+    def test_html_asset_rejects_blank_html(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            Clip(asset={"type": "html", "html": "   "}, length=1.0)
+
+    @pytest.mark.parametrize(
+        "asset",
+        [
+            {
+                "type": "html",
+                "html": '<script src="https://cdn.example/x.js"></script>',
+            },
+            {
+                "type": "html",
+                "html": (
+                    '<link rel="stylesheet" href="https://cdn.example/style.css">'
+                ),
+            },
+            {"type": "html", "html": "<div></div>", "css": "@import url(x.css);"},
+            {
+                "type": "html",
+                "html": "<div></div>",
+                "script": "import('https://cdn.example/mod.js')",
+            },
+        ],
+    )
+    def test_html_asset_rejects_remote_scripts_and_styles(
+        self,
+        asset: dict[str, object],
+    ) -> None:
+        with pytest.raises(ValidationError):
+            Clip(asset=asset, length=1.0)
+
     def test_unknown_asset_type_raises(self) -> None:
         with pytest.raises(ValidationError, match="type"):
             Clip(
-                asset={"type": "html", "src": "https://example.com"},
+                asset={"type": "browser", "src": "https://example.com"},
                 length=3.0,
             )
 

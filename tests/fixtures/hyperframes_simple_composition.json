@@ -1,0 +1,28 @@
+{
+  "renderer": "hyperframes",
+  "timeline": {
+    "background": "#101010",
+    "tracks": [
+      {
+        "clips": [
+          {
+            "asset": {
+              "type": "html",
+              "html": "<div class=\"title\">Hello HyperFrames</div>",
+              "css": ".title { font-family: Inter, sans-serif; font-size: 64px; color: #ffffff; }"
+            },
+            "start": 0.0,
+            "length": 1.5
+          }
+        ]
+      }
+    ]
+  },
+  "output": {
+    "format": "mp4",
+    "width": 640,
+    "height": 360,
+    "fps": 24,
+    "quality": "medium"
+  }
+}

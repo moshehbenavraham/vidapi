@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Annotated, Literal, NamedTuple
 
@@ -353,6 +354,22 @@ class Transform(BaseModel):
 # Asset types (discriminated union on `type`)
 # ---------------------------------------------------------------------------
 
+DEFAULT_MAX_HTML_CHARS = 262_144
+DEFAULT_MAX_HTML_STYLE_CHARS = 65_536
+DEFAULT_MAX_HTML_SCRIPT_CHARS = 65_536
+_REMOTE_URL_PATTERN = re.compile(r"""(?i)\b(?:https?:)?//""")
+_SCRIPT_SRC_PATTERN = re.compile(r"""(?is)<script\b[^>]*\bsrc\s*=\s*["']""")
+_STYLESHEET_LINK_PATTERN = re.compile(
+    r"""(?is)<link\b[^>]*\brel\s*=\s*["'][^"']*stylesheet[^"']*["'][^>]*>"""
+)
+_HREF_PATTERN = re.compile(r"""(?is)\bhref\s*=\s*["']([^"']+)["']""")
+_CSS_IMPORT_PATTERN = re.compile(r"""(?is)@import\b""")
+_UNSAFE_HTML_TAG_PATTERN = re.compile(r"""(?is)<(?:iframe|object|embed)\b""")
+_JAVASCRIPT_URL_PATTERN = re.compile(r"""(?is)\b(?:src|href)\s*=\s*["']javascript:""")
+_SCRIPT_REMOTE_PATTERN = re.compile(
+    r"""(?is)\b(?:import\s*\(|from\s+["'](?:https?:)?//|new\s+Worker\s*\()"""
+)
+
 
 class VideoAsset(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -401,8 +418,102 @@ class ColorAsset(BaseModel):
     color: str = "#000000"
 
 
+class HtmlAsset(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["html"]
+    html: str = Field(min_length=1, max_length=DEFAULT_MAX_HTML_CHARS)
+    css: str | None = Field(default=None, max_length=DEFAULT_MAX_HTML_STYLE_CHARS)
+    script: str | None = Field(
+        default=None,
+        max_length=DEFAULT_MAX_HTML_SCRIPT_CHARS,
+    )
+    media_refs: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("html")
+    @classmethod
+    def _validate_html(cls, value: str) -> str:
+        if not value.strip():
+            msg = "HTML asset content must not be blank"
+            raise ValueError(msg)
+        _reject_null_bytes(value, field_name="html")
+        _reject_unsafe_html(value)
+        return value
+
+    @field_validator("css")
+    @classmethod
+    def _validate_css(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        _reject_null_bytes(value, field_name="css")
+        if _CSS_IMPORT_PATTERN.search(value):
+            msg = "HTML asset CSS must not use @import"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("script")
+    @classmethod
+    def _validate_script(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        _reject_null_bytes(value, field_name="script")
+        if _SCRIPT_REMOTE_PATTERN.search(value) or _REMOTE_URL_PATTERN.search(value):
+            msg = "HTML asset script must not load remote code"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("media_refs")
+    @classmethod
+    def _validate_media_refs(cls, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for value in values:
+            stripped = value.strip()
+            if not stripped:
+                msg = "HTML media references must not be blank"
+                raise ValueError(msg)
+            _reject_null_bytes(stripped, field_name="media_refs")
+            if stripped.startswith(("file:", "/", "../")):
+                msg = "HTML media references must use remote URLs or relative names"
+                raise ValueError(msg)
+            if stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+
+def _reject_null_bytes(value: str, *, field_name: str) -> None:
+    if "\x00" in value:
+        msg = f"HTML asset {field_name} must not contain null bytes"
+        raise ValueError(msg)
+
+
+def _reject_unsafe_html(value: str) -> None:
+    if _SCRIPT_SRC_PATTERN.search(value):
+        msg = "HTML asset must not include script src attributes"
+        raise ValueError(msg)
+    if _UNSAFE_HTML_TAG_PATTERN.search(value):
+        msg = "HTML asset must not include iframe, object, or embed tags"
+        raise ValueError(msg)
+    if _JAVASCRIPT_URL_PATTERN.search(value):
+        msg = "HTML asset must not include javascript URLs"
+        raise ValueError(msg)
+    if _CSS_IMPORT_PATTERN.search(value):
+        msg = "HTML asset must not include stylesheet imports"
+        raise ValueError(msg)
+
+    for match in _STYLESHEET_LINK_PATTERN.finditer(value):
+        href_match = _HREF_PATTERN.search(match.group(0))
+        if href_match is None:
+            continue
+        if _REMOTE_URL_PATTERN.search(href_match.group(1)):
+            msg = "HTML asset must not include remote stylesheet links"
+            raise ValueError(msg)
+
+
 Asset = Annotated[
-    VideoAsset | ImageAsset | TextAsset | AudioAsset | ColorAsset,
+    VideoAsset | ImageAsset | TextAsset | AudioAsset | ColorAsset | HtmlAsset,
     Field(discriminator="type"),
 ]
 

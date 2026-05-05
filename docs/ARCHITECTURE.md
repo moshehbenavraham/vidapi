@@ -4,8 +4,8 @@
 
 VidAPI is a self-hosted FastAPI service that accepts JSON timeline compositions
 and renders video through pluggable renderer backends. The current stack uses
-Editly (a Node.js tool backed by FFmpeg) as the default renderer, invoked as a
-subprocess from an async Python pipeline. Templates, webhook delivery, and
+Editly as the default renderer, native FFmpeg for simple explicit requests, and
+HyperFrames for HTML-backed compositions. Templates, webhook delivery, and
 renderer-independent positioning and transitions all sit on top of the same
 public composition schema.
 
@@ -47,6 +47,10 @@ Render Worker (ARQ consumer)
   |   |   |   |-- Native Subset Validator
   |   |   |   |-- Timeline Helper (duration + visual ordering)
   |   |   |   |-- FFmpeg (direct subprocess)
+  |   |   |-- HyperFrames Renderer (HTML/CSS/GSAP browser render)
+  |   |   |   |-- HyperFrames Compiler (workspace-local project)
+  |   |   |   |-- HTML Boundary Validator (remote script/style rejection)
+  |   |   |   |-- HyperFrames CLI (Node/browser subprocess)
   |   |   |
   |   |   |-- Audio Mixer (FFmpeg post-process for detached audio)
   |   |   |-- Caption Finisher (sidecars + FFmpeg burn-in)
@@ -117,11 +121,17 @@ Local Filesystem (render artifacts)
 - **Location**: `app/renderers/native_ffmpeg.py`, `app/renderers/native_ffmpeg_subset.py`
 - **Current support**: explicit `ffmpeg-native` requests for color, image, video, text PNG, soundtrack, and detached audio timelines without transitions, captions, poster controls, transforms, or client-supplied filters
 
+### HyperFrames Renderer
+- **Purpose**: Compiles VidAPI HTML assets and resolved local media into a workspace-local HyperFrames project and invokes HyperFrames as a Node/browser subprocess
+- **Tech**: HTML asset validation, deterministic project writer, redacted replay metadata, bounded stdout/stderr logs, timeout and cancellation cleanup
+- **Location**: `app/renderers/hyperframes.py`, `app/renderers/hyperframes_compiler.py`
+- **Current support**: explicit `hyperframes` requests or auto-selection when `asset.type: "html"` is present; inline HTML/CSS/script with explicit media references, no remote scripts/styles, no captions/poster controls/transitions for the MVP adapter
+
 ### Renderer Capability Registry
 - **Purpose**: Selects the effective renderer and validates renderer-feature compatibility before queue admission, worker compile, or sync-service compile
 - **Tech**: Immutable support declarations, stable capability exceptions, redacted error context
 - **Location**: `app/renderers/capabilities.py`
-- **Current support**: omitted, `auto`, and `editly` select Editly; explicit `ffmpeg-native` selects the native FFmpeg subset; `hyperframes` is known but unavailable
+- **Current support**: omitted, `null`, and `auto` select HyperFrames for HTML-backed compositions and Editly otherwise; explicit `ffmpeg-native` selects the native FFmpeg subset; explicit `hyperframes` requires at least one HTML asset
 
 ### Segment Compiler
 - **Purpose**: Converts absolute-time timeline clips into sequential Editly clips with layers
@@ -185,7 +195,8 @@ Local Filesystem (render artifacts)
 | structlog | Logging | Structured JSON logs with context binding |
 | httpx | HTTP client | Async, manual redirect control for SSRF validation |
 | Pillow | Text rendering | Deterministic text-to-PNG with bundled fonts |
-| Editly (Node.js) | Video rendering | Declarative timeline editing, reduces custom FFmpeg work |
+| Editly (Node.js) | Default video rendering | Declarative timeline editing, reduces custom FFmpeg work |
+| HyperFrames (Node.js) | HTML/CSS/GSAP rendering | Browser-based HTML capture while preserving VidAPI's renderer-neutral API |
 | FFmpeg | Video encoding | Poster extraction, audio mixing, media probing |
 | hatchling | Build backend | Modern, lightweight, explicit package discovery |
 
@@ -201,7 +212,7 @@ Local Filesystem (render artifacts)
 
 1. Client POSTs JSON composition to `/v1/renders`
 2. Pydantic validates the composition schema
-3. Renderer capability validation selects `editly` for omitted, `auto`, or explicit `editly` requests
+3. Renderer capability validation selects HyperFrames for HTML-backed `auto` requests and Editly for non-HTML defaults
 4. Shared composition limits validate duration, output, captions, posters, and transition semantics
 5. Render record created in SQLite with status `queued` and selected renderer metadata
 6. Input JSON persisted to workspace; job enqueued to Redis via ARQ
@@ -212,7 +223,7 @@ Local Filesystem (render artifacts)
 11. Template-backed renders expand merge variables before compile and persist `expanded.json`
 12. Render service revalidates renderer capabilities and transition semantics before compilation as a replay defense
 13. Selected renderer compiles absolute-time timeline data into renderer-specific artifacts
-14. Editly uses the segment compiler, position resolver, and transition planner; native FFmpeg uses native subset validation, timeline ordering, and deterministic FFmpeg filters
+14. Editly uses the segment compiler, position resolver, and transition planner; native FFmpeg uses native subset validation, timeline ordering, and deterministic FFmpeg filters; HyperFrames writes a local HTML project and invokes the CLI
 15. Compiled renderer JSON + replay metadata written to workspace
 16. Renderer subprocess invoked with timeout; progress parsed from FFmpeg stderr
 17. Detached audio clips mixed via FFmpeg post-processing when needed
@@ -268,6 +279,7 @@ Same pipeline stages run synchronously within the API request when `RENDER_MODE=
 | Cooperative cancellation via DB flag | Not ARQ abort | Renderer-agnostic, easier to test |
 | Two-pass audio mixing | FFmpeg post-process | Editly audioTracks lacks per-track timing; -c:v copy avoids re-encoding |
 | MP4 intermediate for non-MP4 outputs | FFmpeg finishing step | Keeps Editly as the default renderer while enabling WebM, GIF, and PNG sequence artifacts |
+| HyperFrames behind the renderer protocol | VidAPI JSON only | Enables HTML/CSS/GSAP compositions without exposing HyperFrames-native schemas |
 | Caption finishing before output conversion | Shared intermediate step | Burned captions propagate to all requested output formats without renderer-specific public schemas |
 | Public transition allowlist | Explicit enum values | Keeps Editly transition names and params behind the compiler boundary |
 | Workspace isolation per job | Separate WorkspaceManager | Single responsibility, concurrent safety |

@@ -13,6 +13,41 @@ from app.services.output_postprocess import FinishedOutput
 from app.services.render_service import RenderService
 
 
+def _mock_protocol_renderer(name: str, tmp_path) -> MagicMock:
+    workspace = tmp_path / f"{name}-workspace"
+    workspace.mkdir(exist_ok=True)
+    spec_path = workspace / f"compiled.{name}.json"
+    spec_path.write_text("{}", encoding="ascii")
+    replay_path = workspace / "replay.json"
+    replay_path.write_text("{}", encoding="ascii")
+    output_path = workspace / f"{name}.mp4"
+    output_path.write_bytes(b"video")
+    log_path = workspace / "render.log"
+    log_path.write_text("OK", encoding="utf-8")
+
+    renderer = MagicMock()
+    renderer.name = name
+    renderer.compile = AsyncMock(
+        return_value=CompiledRender(
+            spec_path=spec_path,
+            replay_path=replay_path,
+            workspace=workspace,
+            renderer_name=name,
+            spec_json="{}",
+        )
+    )
+    renderer.render = AsyncMock(
+        return_value=RenderArtifact(
+            output_path=output_path,
+            poster_path=None,
+            log_path=log_path,
+            duration_seconds=1.0,
+            exit_code=0,
+        )
+    )
+    return renderer
+
+
 async def _render_count(db_session) -> int:
     _items, total = await render_crud.list_renders(db_session)
     return total
@@ -226,6 +261,52 @@ async def test_direct_render_with_explicit_native_persists_native(
 
 
 @pytest.mark.asyncio
+async def test_direct_render_with_auto_html_persists_hyperframes(
+    client: AsyncClient,
+    db_session,
+    render_service: RenderService,
+    mock_renderer,
+    tmp_path,
+) -> None:
+    hyperframes_renderer = _mock_protocol_renderer("hyperframes", tmp_path)
+
+    def _resolve(name=None):
+        return hyperframes_renderer if name == "hyperframes" else mock_renderer
+
+    render_service._renderer_resolver = _resolve
+
+    payload = {
+        "renderer": "auto",
+        "timeline": {
+            "background": "#000000",
+            "tracks": [
+                {
+                    "clips": [
+                        {
+                            "asset": {
+                                "type": "html",
+                                "html": '<div class="title">Hello</div>',
+                            },
+                            "length": 1.0,
+                        }
+                    ]
+                }
+            ],
+        },
+        "output": {"format": "mp4", "width": 320, "height": 180, "fps": 24},
+    }
+
+    response = await client.post("/v1/renders", json=payload)
+
+    assert response.status_code == 202
+    render = await render_crud.get_render_by_id(db_session, response.json()["id"])
+    assert render is not None
+    assert render.renderer == "hyperframes"
+    hyperframes_renderer.compile.assert_awaited_once()
+    hyperframes_renderer.render.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_render_service_resolves_explicit_native_for_compile(
     db_session,
     test_storage,
@@ -290,3 +371,56 @@ async def test_render_service_resolves_explicit_native_for_compile(
     stored = await render_crud.get_render_by_id(db_session, render.id)
     assert stored is not None
     assert stored.renderer == "ffmpeg-native"
+
+
+@pytest.mark.asyncio
+async def test_render_service_resolves_explicit_hyperframes_for_compile(
+    db_session,
+    test_storage,
+    mock_asset_service,
+    mock_renderer,
+    tmp_path,
+) -> None:
+    hyperframes_renderer = _mock_protocol_renderer("hyperframes", tmp_path)
+    service = RenderService(
+        storage=test_storage,
+        asset_service=mock_asset_service,
+        renderer=mock_renderer,
+        renderer_resolver=lambda name=None: hyperframes_renderer,
+    )
+    composition = Composition.model_validate(
+        {
+            "renderer": "hyperframes",
+            "timeline": {
+                "tracks": [
+                    {
+                        "clips": [
+                            {
+                                "asset": {
+                                    "type": "html",
+                                    "html": "<div>Hello</div>",
+                                },
+                                "length": 1.0,
+                            }
+                        ]
+                    }
+                ]
+            },
+            "output": {"format": "mp4", "width": 320, "height": 180},
+        }
+    )
+    render = await render_crud.create_render(db_session)
+    job_workspace = await test_storage.create_workspace(render.id)
+
+    compiled = await service.stage_resolve_and_compile(
+        composition,
+        render.id,
+        job_workspace,
+        db_session,
+    )
+
+    assert compiled.renderer_name == "hyperframes"
+    hyperframes_renderer.compile.assert_awaited_once()
+    stored = await render_crud.get_render_by_id(db_session, render.id)
+    assert stored is not None
+    assert stored.renderer == "hyperframes"

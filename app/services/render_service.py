@@ -15,6 +15,7 @@ from app.models.composition import (
     CaptionMode,
     Clip,
     Composition,
+    HtmlAsset,
     ImageAsset,
     PosterMode,
     TextAsset,
@@ -557,8 +558,7 @@ class RenderService:
 
         for track in composition.timeline.tracks:
             for clip in track.clips:
-                resolved = await self._resolve_clip_asset(clip, workspace)
-                if resolved is not None:
+                for resolved in await self._resolve_clip_assets(clip, workspace):
                     src, local_path = resolved
                     asset_map[src] = local_path
 
@@ -571,27 +571,36 @@ class RenderService:
 
         return asset_map
 
-    async def _resolve_clip_asset(
+    async def _resolve_clip_assets(
         self,
         clip: Clip,
         workspace: Path,
-    ) -> tuple[str, str] | None:
-        """Resolve a single clip's asset, returning (src, local_path) or None."""
+    ) -> list[tuple[str, str]]:
+        """Resolve a single clip's asset refs, returning (src, local_path) pairs."""
         asset = clip.asset
 
         if isinstance(asset, (VideoAsset, ImageAsset, AudioAsset)):
             resolved = await self._asset_service.resolve_asset(
                 asset.src, workspace=workspace
             )
-            return asset.src, str(resolved.local_path)
+            return [(asset.src, str(resolved.local_path))]
 
         if isinstance(asset, TextAsset):
             resolved = await self._asset_service.resolve_asset(
                 "", text_asset=asset, workspace=workspace
             )
-            return asset_resolver_key(clip) or "", str(resolved.local_path)
+            return [(asset_resolver_key(clip) or "", str(resolved.local_path))]
 
-        return None
+        if isinstance(asset, HtmlAsset):
+            resolved_assets: list[tuple[str, str]] = []
+            for media_ref in asset.media_refs:
+                resolved = await self._asset_service.resolve_asset(
+                    media_ref, workspace=workspace
+                )
+                resolved_assets.append((media_ref, str(resolved.local_path)))
+            return resolved_assets
+
+        return []
 
     # ------------------------------------------------------------------
     # Failure handling

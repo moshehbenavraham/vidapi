@@ -1041,7 +1041,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 | 01 | Async Jobs and Multi-track | 5 | Complete (5/5) |
 | 02 | Templates and Polish | 5 | Complete (5/5) |
 | 03 | Production Hardening | 5 | Complete (5/5) |
-| 04 | Advanced Rendering | 6 | In Progress (2/6) |
+| 04 | Advanced Rendering | 6 | Complete (6/6) |
 
 ## Phase 00: Foundation
 
@@ -1218,7 +1218,7 @@ Expand creative ceiling and performance options without changing the public API.
 | 05 | Native FFmpeg Renderer Subset | ~22 |
 | 06 | HyperFrames Renderer Adapter | ~22 |
 
-Session stubs: `.spec_system/PRD/phase_04/`
+Archived phase assets: `.spec_system/archive/phases/phase_04/`
 
 ## First Build Target
 

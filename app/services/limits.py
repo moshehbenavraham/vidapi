@@ -8,6 +8,7 @@ from app.models.composition import (
     AudioAsset,
     ColorAsset,
     Composition,
+    HtmlAsset,
     ImageAsset,
     OutputFormat,
     PosterMode,
@@ -73,6 +74,8 @@ def summarize_composition(composition: Composition) -> CompositionLimitStats:
             duration_seconds = max(duration_seconds, clip.start + clip.length)
             if not isinstance(clip.asset, ColorAsset):
                 asset_count += 1
+            if isinstance(clip.asset, HtmlAsset):
+                asset_count += len(clip.asset.media_refs)
 
     if composition.timeline.soundtrack is not None:
         asset_count += 1
@@ -139,6 +142,7 @@ def validate_composition_limits(
     validate_output_format_limits(composition, settings, stats=stats)
     validate_caption_limits(composition, settings, stats=stats)
     validate_poster_limits(composition, stats=stats)
+    validate_html_limits(composition, settings)
     validate_transition_limits(composition)
 
 
@@ -283,6 +287,42 @@ def validate_transition_limits(composition: Composition) -> None:
     )
 
 
+def validate_html_limits(composition: Composition, settings: Settings) -> None:
+    """Raise if inline HTML assets exceed configured payload guardrails."""
+    for track_index, track in enumerate(composition.timeline.tracks):
+        for clip_index, clip in enumerate(track.clips):
+            if not isinstance(clip.asset, HtmlAsset):
+                continue
+            asset = clip.asset
+            prefix = f"timeline.tracks[{track_index}].clips[{clip_index}].asset"
+            _raise_if_exceeds(
+                field=f"{prefix}.html",
+                observed=len(asset.html.encode("utf-8")),
+                limit=settings.max_html_asset_bytes,
+                code=COMPOSITION_LIMIT_EXCEEDED,
+            )
+            if asset.css is not None:
+                _raise_if_exceeds(
+                    field=f"{prefix}.css",
+                    observed=len(asset.css.encode("utf-8")),
+                    limit=settings.max_html_css_bytes,
+                    code=COMPOSITION_LIMIT_EXCEEDED,
+                )
+            if asset.script is not None:
+                _raise_if_exceeds(
+                    field=f"{prefix}.script",
+                    observed=len(asset.script.encode("utf-8")),
+                    limit=settings.max_html_script_bytes,
+                    code=COMPOSITION_LIMIT_EXCEEDED,
+                )
+            _raise_if_exceeds(
+                field=f"{prefix}.media_refs",
+                observed=len(asset.media_refs),
+                limit=settings.max_html_media_refs,
+                code=COMPOSITION_LIMIT_EXCEEDED,
+            )
+
+
 def validate_media_limits(
     media_info: MediaInfo,
     settings: Settings,
@@ -318,7 +358,7 @@ def validate_media_limits(
 
 
 def is_media_asset(asset: object) -> bool:
-    return isinstance(asset, (AudioAsset, ImageAsset, TextAsset, VideoAsset))
+    return isinstance(asset, (AudioAsset, HtmlAsset, ImageAsset, TextAsset, VideoAsset))
 
 
 def _raise_if_exceeds(

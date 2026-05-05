@@ -13,6 +13,8 @@ from app.db.session import get_session
 from app.renderers import (
     DEFAULT_RENDERER,
     FFMPEG_NATIVE_RENDERER,
+    HYPERFRAMES_RENDERER,
+    HyperFramesRenderer,
     NativeFfmpegRenderer,
     RendererProtocol,
     RendererResolver,
@@ -85,6 +87,12 @@ def get_native_ffmpeg_renderer() -> NativeFfmpegRenderer:
 
 
 @lru_cache(maxsize=1)
+def get_hyperframes_renderer() -> HyperFramesRenderer:
+    settings = get_settings()
+    return HyperFramesRenderer(settings=settings)
+
+
+@lru_cache(maxsize=1)
 def get_renderer_resolver() -> RendererResolver:
     def _resolve(renderer_name: str | None = None) -> RendererProtocol:
         selection = select_renderer(renderer_name)
@@ -92,6 +100,8 @@ def get_renderer_resolver() -> RendererResolver:
             return get_editly_renderer()
         if selection.renderer == FFMPEG_NATIVE_RENDERER:
             return get_native_ffmpeg_renderer()
+        if selection.renderer == HYPERFRAMES_RENDERER:
+            return get_hyperframes_renderer()
         msg = f"No renderer implementation configured for {selection.renderer}"
         raise ValueError(msg)
 

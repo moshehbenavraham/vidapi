@@ -80,6 +80,22 @@ def test_render_timeout_default() -> None:
     assert settings.render_timeout_seconds == 600
 
 
+def test_hyperframes_settings_defaults() -> None:
+    settings = Settings()
+    assert settings.hyperframes_bin == "hyperframes"
+    assert settings.hyperframes_timeout_seconds == 600
+    assert settings.hyperframes_workers == 1
+    assert settings.max_html_asset_bytes == 262_144
+    assert settings.max_html_css_bytes == 65_536
+    assert settings.max_html_script_bytes == 65_536
+    assert settings.max_html_media_refs == 32
+
+
+def test_hyperframes_worker_bounds() -> None:
+    with pytest.raises(ValueError, match="less than or equal"):
+        Settings(hyperframes_workers=99)
+
+
 def test_s3_backend_requires_bucket() -> None:
     with pytest.raises(ValueError, match="S3_BUCKET"):
         Settings(storage_backend="s3")

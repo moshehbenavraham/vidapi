@@ -130,6 +130,34 @@ def test_composition_asset_count_limit_rejected() -> None:
     assert exc_info.value.violation.field == "timeline.assets"
 
 
+def test_html_payload_limit_rejected() -> None:
+    composition = Composition.model_validate(
+        {
+            "timeline": {
+                "tracks": [
+                    {
+                        "clips": [
+                            {
+                                "asset": {
+                                    "type": "html",
+                                    "html": "<div>" + ("x" * 2048) + "</div>",
+                                },
+                                "length": 1.0,
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    )
+    settings = Settings(max_html_asset_bytes=1024)
+
+    with pytest.raises(LimitExceededError) as exc_info:
+        validate_composition_limits(composition, settings)
+
+    assert exc_info.value.violation.field.endswith(".asset.html")
+
+
 def test_media_duration_and_stream_limits_rejected() -> None:
     media_info = MediaInfo(
         duration=30.0,

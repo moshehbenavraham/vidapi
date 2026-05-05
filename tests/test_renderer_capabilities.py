@@ -9,6 +9,8 @@ from app.renderers.capabilities import (
     EDITLY_RENDERER,
     FFMPEG_NATIVE_CAPABILITY,
     FFMPEG_NATIVE_RENDERER,
+    HYPERFRAMES_CAPABILITY,
+    HYPERFRAMES_RENDERER,
     RENDERER_CAPABILITIES,
     RendererCapability,
     UnsupportedRendererError,
@@ -44,7 +46,7 @@ def _composition(**overrides: object) -> Composition:
 
 
 def test_renderer_registry_exposes_known_and_available_names() -> None:
-    assert available_renderer_names() == ("editly", "ffmpeg-native")
+    assert available_renderer_names() == ("editly", "ffmpeg-native", "hyperframes")
     assert known_renderer_names() == ("editly", "ffmpeg-native", "hyperframes")
     assert EDITLY_CAPABILITY.available is True
     assert EDITLY_CAPABILITY.output_formats == {
@@ -54,6 +56,7 @@ def test_renderer_registry_exposes_known_and_available_names() -> None:
         "webm",
     }
     assert FFMPEG_NATIVE_CAPABILITY.available is True
+    assert HYPERFRAMES_CAPABILITY.available is True
 
 
 @pytest.mark.parametrize("requested", [None, "auto", "editly"])
@@ -71,17 +74,11 @@ def test_select_renderer_accepts_explicit_native_renderer() -> None:
     assert selection.capability.name == FFMPEG_NATIVE_RENDERER
 
 
-@pytest.mark.parametrize("requested", ["hyperframes"])
-def test_select_renderer_rejects_unavailable_future_renderers(
-    requested: str,
-) -> None:
-    with pytest.raises(UnsupportedRendererError) as exc_info:
-        select_renderer(requested)
+def test_select_renderer_accepts_explicit_hyperframes_renderer() -> None:
+    selection = select_renderer("hyperframes")
 
-    exc = exc_info.value
-    assert exc.code == "UNSUPPORTED_RENDERER"
-    assert exc.to_context()["renderer"] == requested
-    assert exc.to_context()["reason"] == "unavailable"
+    assert selection.renderer == HYPERFRAMES_RENDERER
+    assert selection.capability.name == HYPERFRAMES_RENDERER
 
 
 def test_select_renderer_rejects_unknown_renderer() -> None:
@@ -99,6 +96,79 @@ def test_validate_renderer_capabilities_accepts_supported_editly_composition() -
     selection = validate_renderer_capabilities(composition)
 
     assert selection.renderer == "editly"
+
+
+def test_auto_selects_hyperframes_for_html_composition() -> None:
+    composition = _composition(
+        renderer="auto",
+        timeline={
+            "tracks": [
+                {
+                    "clips": [
+                        {
+                            "asset": {
+                                "type": "html",
+                                "html": "<div>Hello</div>",
+                            },
+                            "length": 1.0,
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+
+    selection = validate_renderer_capabilities(composition)
+
+    assert selection.renderer == "hyperframes"
+
+
+def test_explicit_editly_rejects_html_asset_with_redacted_context() -> None:
+    composition = _composition(
+        renderer="editly",
+        callback="https://callback.example.com/hook?token=secret",
+        timeline={
+            "tracks": [
+                {
+                    "clips": [
+                        {
+                            "asset": {
+                                "type": "html",
+                                "html": '<img src="https://example.com/a.png?secret=x">',
+                                "media_refs": [
+                                    "https://example.com/a.png?secret=x",
+                                ],
+                            },
+                            "length": 1.0,
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(UnsupportedRendererFeatureError) as exc_info:
+        validate_renderer_capabilities(composition)
+
+    context = exc_info.value.to_context()
+    assert context["renderer"] == "editly"
+    assert context["feature"] == "timeline.tracks[0].clips[0].asset.type"
+    assert context["requested"] == "html"
+    context_text = repr(context)
+    assert "example.com" not in context_text
+    assert "secret" not in context_text
+
+
+def test_explicit_hyperframes_rejects_missing_html_asset() -> None:
+    composition = _composition(renderer="hyperframes")
+
+    with pytest.raises(UnsupportedRendererFeatureError) as exc_info:
+        validate_renderer_capabilities(composition)
+
+    context = exc_info.value.to_context()
+    assert context["renderer"] == "hyperframes"
+    assert context["feature"] == "timeline.html_asset"
+    assert context["requested"] == "absent"
 
 
 def test_editly_capability_declares_advanced_transitions() -> None:
