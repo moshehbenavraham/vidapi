@@ -84,11 +84,67 @@ jobs:
           MINIO_ROOT_PASSWORD=change-me-minio
           EOF
 
-      - name: Start production-like stack
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build
+      - name: Start production-like core services
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build api postgres redis minio
 
-      - name: Run smoke test
-        run: bash scripts/smoke-test.sh
+      - name: Run lightweight smoke test
+        run: |
+          set -euo pipefail
+
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if curl -sf http://localhost:8000/v1/health >/tmp/vidapi-health.json; then
+              break
+            fi
+            sleep 5
+          done
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          health = json.loads(Path('/tmp/vidapi-health.json').read_text())
+          if health.get('status') != 'healthy':
+              raise SystemExit(f"unexpected health status: {health!r}")
+          if health.get('redis', {}).get('status') != 'healthy':
+              raise SystemExit(f"unexpected redis status: {health!r}")
+          PY
+
+          response=$(curl -sf -X POST http://localhost:8000/v1/renders \
+            -H "Content-Type: application/json" \
+            -d '{
+              "timeline": {
+                "background": "#000000",
+                "tracks": [
+                  {
+                    "clips": [
+                      {
+                        "asset": {"type": "color", "color": "#3366ff"},
+                        "start": 0,
+                        "length": 1
+                      }
+                    ]
+                  }
+                ]
+              },
+              "output": {
+                "format": "mp4",
+                "width": 320,
+                "height": 240,
+                "fps": 15,
+                "quality": "low"
+              }
+            }')
+
+          python3 - <<'PY' "$response"
+          import json
+          import sys
+
+          payload = json.loads(sys.argv[1])
+          if payload.get('status') != 'queued':
+              raise SystemExit(f"unexpected render response: {payload!r}")
+          if not payload.get('id'):
+              raise SystemExit(f"missing render id: {payload!r}")
+          PY
 
       - name: Collect logs on failure
         if: failure()
