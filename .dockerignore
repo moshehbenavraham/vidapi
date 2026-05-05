@@ -7,6 +7,7 @@ docs/
 __pycache__/
 *.pyc
 .env
+.env.docker
 .venv/
 data/
 logs/
@@ -14,3 +15,5 @@ logs/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+Dockerfile.legacy
+docker-compose.yml

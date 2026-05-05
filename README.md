@@ -4,13 +4,49 @@ Self-hosted Python FastAPI service for programmatic video rendering.
 Accepts JSON timeline compositions and renders video via Editly + FFmpeg.
 A self-hosted, open-source alternative to Creatomate and JSON2Video.
 
-## Quick Start
+## Quick Start (Docker Compose)
+
+The fastest way to run VidAPI with the full async render pipeline:
 
 ```bash
-# One command (Docker)
+# Prerequisites: Docker Engine 24+ and Docker Compose v2
+
+# Start API, worker, and Redis
 docker compose up --build
 
-# Or local development
+# Verify health (in another terminal)
+curl http://localhost:8000/v1/health
+
+# Run the end-to-end smoke test
+bash scripts/smoke-test.sh
+```
+
+This starts three services:
+- **api** (port 8000) -- FastAPI server accepting render requests
+- **worker** -- ARQ consumer with Editly/FFmpeg for rendering
+- **redis** (port 6379) -- Job queue broker
+
+### Environment Customization
+
+Default environment values live in `.env.docker`. Override any variable:
+
+```bash
+# Example: enable debug logging
+echo "LOG_LEVEL=DEBUG" >> .env.docker
+docker compose up --build
+```
+
+### Stopping and Cleaning Up
+
+```bash
+docker compose down           # Stop services
+docker compose down -v        # Stop and remove volumes
+```
+
+## Quick Start (Local Development)
+
+```bash
+# Prerequisites: Python 3.11+, Node.js 20+, FFmpeg 6+, Redis
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 uvicorn app.main:app --reload
@@ -24,7 +60,8 @@ curl http://localhost:8000/v1/health
 - Python 3.11+
 - Node.js 20+ (for Editly renderer)
 - FFmpeg 6+ and ffprobe
-- Bundled fonts: Inter, Roboto, or Noto Sans
+- Bundled fonts: Inter, Noto Sans, DejaVu
+- Docker Engine 24+ and Docker Compose v2 (for containerized stack)
 
 ## Repository Structure
 
@@ -42,8 +79,10 @@ curl http://localhost:8000/v1/health
 |-- alembic/               # Database migrations
 |-- tests/                 # 226+ tests (schema, security, compiler, API)
 |-- docs/                  # Architecture, development, deployment guides
-|-- Dockerfile             # Multi-stage: Node + Python + FFmpeg + fonts
-|-- docker-compose.yml     # One-command local stack
+|-- Dockerfile.api          # Slim API image (Python + FastAPI)
+|-- Dockerfile.worker       # Full worker image (Python + Node + FFmpeg)
+|-- docker-compose.yml      # Multi-service compose stack (API + Worker + Redis)
+|-- scripts/                # Docker helper scripts (health check, smoke test)
 \-- pyproject.toml         # Dependencies and tool config
 ```
 
@@ -87,7 +126,7 @@ current progress and roadmap.
 | Phase | Name | Status |
 |-------|------|--------|
 | 00 | Foundation | Complete (5/5 sessions) |
-| 01 | Async Jobs and Multi-track | In Progress (1/5 sessions) |
+| 01 | Async Jobs and Multi-track | In Progress (5/5 sessions) |
 | 02 | Templates and Polish | Not Started |
 | 03 | Production Hardening | Not Started |
 | 04 | Advanced Rendering | Not Started |

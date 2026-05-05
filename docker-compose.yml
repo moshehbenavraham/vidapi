@@ -1,17 +1,65 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.api
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/vidapi.db
-      - DEBUG=true
-      - LOG_LEVEL=DEBUG
+    env_file:
+      - .env.docker
     volumes:
       - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vidapi-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env.docker
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vidapi-net
+    healthcheck:
+      test: ["CMD", "bash", "/usr/local/bin/worker-healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    networks:
+      - vidapi-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  vidapi-net:
+    driver: bridge
+
+volumes:
+  redis-data:

@@ -1,0 +1,59 @@
+FROM node:20-slim AS node-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    libxi-dev \
+    libgl1-mesa-dev \
+    pkg-config \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g editly
+
+
+FROM python:3.11-slim AS runtime
+
+COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/editly/cli.js /usr/local/bin/editly \
+    && chmod +x /usr/local/lib/node_modules/editly/cli.js \
+    && ln -sf /usr/local/bin/node /usr/local/bin/nodejs
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    fonts-inter \
+    fonts-noto \
+    fonts-dejavu-core \
+    curl \
+    libgl1 \
+    libegl1 \
+    libxi6 \
+    libgles2 \
+    xvfb \
+    xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash --uid 1000 vidapi
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir . 2>/dev/null || true
+
+COPY . .
+RUN pip install --no-cache-dir .
+
+COPY scripts/worker-healthcheck.sh /usr/local/bin/worker-healthcheck.sh
+COPY scripts/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+RUN chmod +x /usr/local/bin/worker-healthcheck.sh /usr/local/bin/worker-entrypoint.sh
+
+RUN mkdir -p /app/data && chown -R vidapi:vidapi /app
+
+USER vidapi
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD /usr/local/bin/worker-healthcheck.sh
+
+CMD ["/usr/local/bin/worker-entrypoint.sh"]

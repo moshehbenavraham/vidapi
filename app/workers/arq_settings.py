@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from arq.connections import RedisSettings
-
 from app.core.config import get_settings
 from app.core.redis import get_redis_settings
 from app.workers.render_worker import run_render, worker_shutdown, worker_startup
@@ -27,6 +25,4 @@ class WorkerSettings:
     job_timeout = get_settings().render_timeout_seconds + 100
     health_check_interval = 30
 
-    @staticmethod
-    def redis_settings() -> RedisSettings:
-        return get_redis_settings()
+    redis_settings = get_redis_settings()
