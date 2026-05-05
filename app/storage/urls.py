@@ -4,6 +4,10 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from app.api.errors import StorageError
+from app.models.output_artifacts import (
+    RenderOutputMetadata,
+    output_metadata_from_render,
+)
 from app.models.render import RenderStatus
 from app.storage.base import (
     ArtifactStorageProtocol,
@@ -73,6 +77,22 @@ class StorageUrlResolver:
             render.id,
             render.poster_path,
             ArtifactType.POSTER,
+        )
+
+    async def manifest_url(self, render: Any) -> str | None:
+        manifest_path = getattr(render, "output_manifest_path", None)
+        if not manifest_path:
+            return None
+        return await self.artifact_url(
+            render.id,
+            manifest_path,
+            ArtifactType.MANIFEST,
+        )
+
+    async def output_metadata(self, render: Any) -> RenderOutputMetadata | None:
+        return output_metadata_from_render(
+            render,
+            manifest_url=await self.manifest_url(render),
         )
 
     async def artifact_url(

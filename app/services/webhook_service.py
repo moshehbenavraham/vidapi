@@ -14,6 +14,10 @@ from app.core.config import Settings, get_settings
 from app.core.logging import safe_log_excerpt
 from app.db import render_crud, webhook_crud
 from app.db.models import Render
+from app.models.output_artifacts import (
+    RenderOutputMetadata,
+    output_metadata_from_render,
+)
 from app.storage.factory import build_storage, build_storage_url_resolver
 from app.storage.urls import StorageUrlResolver
 
@@ -26,6 +30,7 @@ def build_webhook_payload(
     render: Render,
     url: str | None = None,
     poster: str | None = None,
+    output: RenderOutputMetadata | None = None,
 ) -> dict[str, Any]:
     """Construct the PRD-specified webhook payload as a plain dict.
 
@@ -41,12 +46,19 @@ def build_webhook_payload(
     if render.completed_at is not None:
         completed_at = render.completed_at.isoformat()
 
+    output_metadata = output or output_metadata_from_render(render)
+
     return {
         "event": event,
         "render_id": render.id,
         "status": render.status,
         "url": url,
         "poster": poster,
+        "output": (
+            output_metadata.model_dump(mode="json")
+            if output_metadata is not None
+            else None
+        ),
         "completed_at": completed_at,
     }
 
@@ -58,11 +70,18 @@ async def build_storage_aware_webhook_payload(
     url_resolver: StorageUrlResolver,
 ) -> dict[str, Any]:
     """Construct a webhook payload with storage-aware artifact URLs."""
+    output_metadata_resolver = getattr(url_resolver, "output_metadata", None)
+    output = (
+        await output_metadata_resolver(render)
+        if output_metadata_resolver is not None
+        else output_metadata_from_render(render)
+    )
     return build_webhook_payload(
         event=event,
         render=render,
         url=await url_resolver.output_url(render),
         poster=await url_resolver.poster_url(render),
+        output=output,
     )
 
 

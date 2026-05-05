@@ -24,6 +24,7 @@ class ArtifactType(StrEnum):
     EXPANDED = "expanded.json"
     COMPILED = "compiled.editly.json"
     OUTPUT = "output"
+    MANIFEST = "manifest.json"
     POSTER = "poster.jpg"
     REPLAY = "replay.json"
     LOG = "logs.txt"
@@ -45,6 +46,7 @@ ARTIFACT_MEDIA_TYPES: dict[ArtifactType, str] = {
     ArtifactType.EXPANDED: "application/json",
     ArtifactType.COMPILED: "application/json",
     ArtifactType.OUTPUT: "video/mp4",
+    ArtifactType.MANIFEST: "application/json",
     ArtifactType.POSTER: "image/jpeg",
     ArtifactType.REPLAY: "application/json",
     ArtifactType.LOG: "text/plain; charset=utf-8",

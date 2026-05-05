@@ -17,6 +17,7 @@ from app.models.composition import (
     TextAsset,
     VideoAsset,
 )
+from app.models.output_artifacts import StoredOutputMetadata
 from app.models.render import RenderStatus
 from app.renderers import get_renderer
 from app.renderers.base import (
@@ -33,6 +34,7 @@ from app.renderers.capabilities import (
 from app.renderers.poster import PosterError, generate_poster
 from app.services.asset_service import AssetService
 from app.services.merge import MergeError, expand_merge_variables
+from app.services.output_postprocess import OutputPostprocessor
 from app.storage.base import ArtifactStorageProtocol, ArtifactType
 
 logger = structlog.get_logger(__name__)
@@ -67,11 +69,13 @@ class RenderService:
         asset_service: AssetService,
         renderer: RendererProtocol,
         renderer_resolver: RendererResolver | None = None,
+        output_postprocessor: OutputPostprocessor | None = None,
     ) -> None:
         self._storage = storage
         self._asset_service = asset_service
         self._renderer = renderer
         self._renderer_resolver = renderer_resolver or get_renderer
+        self._output_postprocessor = output_postprocessor or OutputPostprocessor()
 
     def _resolve_renderer(self, renderer_name: str) -> RendererProtocol:
         if self._renderer.name == renderer_name:
@@ -327,22 +331,47 @@ class RenderService:
                 str(exc), error_code="RENDER_ERROR", cause=exc
             ) from exc
 
+        try:
+            finished = await self._output_postprocessor.finish(
+                composition=composition,
+                artifact=artifact,
+                render_id=render_id,
+                workspace=workspace,
+            )
+        except RenderError as exc:
+            await render_crud.clear_render_output_metadata(session, render_id)
+            raise RenderServiceError(
+                str(exc), error_code="RENDER_ERROR", cause=exc
+            ) from exc
+
         output_uri = await self._publish_file(
             render_id,
             ArtifactType.OUTPUT,
-            artifact.output_path,
-        )
-        log_uri = await self._publish_file(
-            render_id,
-            ArtifactType.LOG,
-            artifact.log_path,
+            finished.output_path,
+            suffix=finished.suffix,
+            media_type=finished.media_type,
         )
 
-        await render_crud.update_render_paths(
+        manifest_uri: str | None = None
+        if finished.manifest_path is not None:
+            manifest_uri = await self._publish_file(
+                render_id,
+                ArtifactType.MANIFEST,
+                finished.manifest_path,
+                media_type="application/json",
+            )
+
+        await render_crud.update_render_output_metadata(
             session,
             render_id,
+            metadata=StoredOutputMetadata(
+                format=composition.output.format,
+                media_type=finished.media_type,
+                filename=finished.filename,
+                frame_count=finished.frame_count,
+                manifest_path=manifest_uri,
+            ),
             output_path=output_uri,
-            log_path=log_uri,
         )
 
         poster_path: Path | None = None
@@ -370,11 +399,21 @@ class RenderService:
             )
 
         log_path = workspace / "logs.txt"
+        log_parts: list[str] = []
         if artifact.log_path.exists():
-            log_content = artifact.log_path.read_text(
-                encoding="utf-8", errors="replace"
+            log_parts.append(
+                artifact.log_path.read_text(encoding="utf-8", errors="replace")
             )
-            log_path.write_text(log_content, encoding="utf-8")
+        if (
+            finished.log_path is not None
+            and finished.log_path != artifact.log_path
+            and finished.log_path.exists()
+        ):
+            log_parts.append(
+                finished.log_path.read_text(encoding="utf-8", errors="replace")
+            )
+        if log_parts:
+            log_path.write_text("\n".join(log_parts), encoding="utf-8")
             durable_log_uri = await self._publish_file(
                 render_id,
                 ArtifactType.LOG,

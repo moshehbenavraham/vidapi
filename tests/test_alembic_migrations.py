@@ -67,7 +67,7 @@ def test_sqlmodel_metadata_includes_current_database_tables() -> None:
 def test_alembic_has_single_current_head() -> None:
     heads = _alembic_script().get_heads()
 
-    assert heads == ["005"]
+    assert heads == ["006"]
 
 
 def test_alembic_revision_chain_includes_webhook_revision() -> None:
@@ -76,7 +76,7 @@ def test_alembic_revision_chain_includes_webhook_revision() -> None:
         for revision in _alembic_script().walk_revisions(base="base", head="heads")
     }
 
-    assert {"001", "002", "003", "004", "005"}.issubset(revisions)
+    assert {"001", "002", "003", "004", "005", "006"}.issubset(revisions)
 
 
 def test_alembic_upgrades_and_downgrades_sqlite_database(
@@ -91,7 +91,7 @@ def test_alembic_upgrades_and_downgrades_sqlite_database(
         command.upgrade(_alembic_config(), "head")
 
         assert EXPECTED_TABLES.issubset(_sqlite_tables(database_path))
-        assert _sqlite_alembic_version(database_path) == "005"
+        assert _sqlite_alembic_version(database_path) == "006"
 
         command.downgrade(_alembic_config(), "base")
 

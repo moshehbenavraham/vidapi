@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from app.core.config import Settings
@@ -8,6 +9,7 @@ from app.models.composition import (
     ColorAsset,
     Composition,
     ImageAsset,
+    OutputFormat,
     TextAsset,
     VideoAsset,
 )
@@ -132,6 +134,67 @@ def validate_composition_limits(
         limit=settings.max_assets_per_render,
         code=COMPOSITION_LIMIT_EXCEEDED,
     )
+    validate_output_format_limits(composition, settings, stats=stats)
+
+
+def validate_output_format_limits(
+    composition: Composition,
+    settings: Settings,
+    *,
+    stats: CompositionLimitStats | None = None,
+) -> None:
+    """Raise if the requested output format exceeds format guardrails."""
+    if stats is None:
+        stats = summarize_composition(composition)
+
+    output_pixels = stats.output_width * stats.output_height
+    if composition.output.format is OutputFormat.GIF:
+        _raise_if_exceeds(
+            field="output.gif.duration",
+            observed=stats.duration_seconds,
+            limit=settings.max_gif_duration_seconds,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field="output.gif.fps",
+            observed=stats.output_fps,
+            limit=settings.max_gif_fps,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field="output.gif.pixels",
+            observed=output_pixels,
+            limit=settings.max_gif_pixels,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        return
+
+    if composition.output.format is OutputFormat.PNG_SEQUENCE:
+        frame_count = math.ceil(stats.duration_seconds * stats.output_fps)
+        _raise_if_exceeds(
+            field="output.png_sequence.duration",
+            observed=stats.duration_seconds,
+            limit=settings.max_png_sequence_duration_seconds,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field="output.png_sequence.fps",
+            observed=stats.output_fps,
+            limit=settings.max_png_sequence_fps,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field="output.png_sequence.frames",
+            observed=frame_count,
+            limit=settings.max_png_sequence_frames,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field="output.png_sequence.pixels",
+            observed=output_pixels,
+            limit=settings.max_png_sequence_pixels,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
 
 
 def validate_media_limits(

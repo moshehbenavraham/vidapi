@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.models.composition import Composition, OutputFormat, TransitionType
+from app.services.output_formats import supported_output_formats
 
 AUTO_RENDERER = "auto"
 DEFAULT_RENDERER = "editly"
@@ -132,7 +133,7 @@ EDITLY_CAPABILITY = RendererCapability(
     name=EDITLY_RENDERER,
     available=True,
     asset_types=frozenset({"video", "image", "text", "audio", "color"}),
-    output_formats=frozenset({OutputFormat.MP4}),
+    output_formats=supported_output_formats(),
     transitions=frozenset(
         {
             TransitionType.FADE_IN,

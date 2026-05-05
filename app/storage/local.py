@@ -122,6 +122,13 @@ class LocalStorage:
                     "artifact": artifact_type.value,
                 },
             ) from exc
+        logger.debug(
+            "artifact_published_local",
+            render_id=render_id,
+            artifact=artifact_type.value,
+            filename=descriptor.filename,
+            media_type=descriptor.media_type,
+        )
         return str(dest)
 
     async def publish_file(
@@ -162,6 +169,13 @@ class LocalStorage:
                     "path": str(source_path),
                 },
             ) from exc
+        logger.debug(
+            "artifact_file_published_local",
+            render_id=render_id,
+            artifact=artifact_type.value,
+            filename=descriptor.filename,
+            media_type=descriptor.media_type,
+        )
         return str(dest)
 
     async def read_artifact(

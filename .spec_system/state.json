@@ -58,7 +58,8 @@
     "phase03-session03-api-key-authentication-and-access-control",
     "phase03-session04-limits-resource-controls-and-asset-security-hardening",
     "phase03-session05-operational-visibility-and-production-stack",
-    "phase04-session01-renderer-capability-registry"
+    "phase04-session01-renderer-capability-registry",
+    "phase04-session02-output-formats-and-presets"
   ],
   "next_session_history": [
     {
@@ -359,6 +360,21 @@
     {
       "date": "2026-05-05",
       "session": "phase04-session01-renderer-capability-registry",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session02-output-formats-and-presets",
+      "status": "planned"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session02-output-formats-and-presets",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session02-output-formats-and-presets",
       "status": "completed"
     }
   ]

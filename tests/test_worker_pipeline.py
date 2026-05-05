@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
+from app.core.config import Settings
 from app.db import render_crud
 from app.db.session import set_engine
 from app.models.error_codes import ErrorCode
@@ -336,10 +337,7 @@ class TestPipelineFailures:
         }
 
         with patch("app.workers.render_worker.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.render_timeout_seconds = 1
-            settings.workspace_cleanup_enabled = True
-            settings.workspace_cleanup_keep_on_failure = True
+            settings = Settings(render_timeout_seconds=1)
             mock_settings.return_value = settings
             await run_render(ctx, render_id)
 
@@ -496,7 +494,7 @@ class TestPipelineFailures:
     ):
         """Worker rejects unsupported renderer features before stage execution."""
         payload = deepcopy(sample_composition_dict)
-        payload["output"]["format"] = "webm"
+        payload["renderer"] = "hyperframes"
         render_id = await _create_render_with_input(
             pipeline_session_factory,
             pipeline_workspace,
@@ -515,7 +513,46 @@ class TestPipelineFailures:
             render = await render_crud.get_render_by_id(session, render_id)
             assert render is not None
             assert render.status == RenderStatus.FAILED.value
-            assert render.error_code == ErrorCode.UNSUPPORTED_RENDERER_FEATURE.value
+            assert render.error_code == ErrorCode.UNSUPPORTED_RENDERER.value
+            assert render.renderer == "hyperframes"
+
+        mock_service.stage_validate_and_expand.assert_not_called()
+        mock_service.stage_resolve_and_compile.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_limit_validation_failure_marks_failed_before_pipeline_stages(
+        self,
+        pipeline_db_engine,
+        pipeline_session_factory,
+        pipeline_workspace,
+        mock_service,
+        sample_composition_dict,
+    ):
+        """Worker rejects output limit failures before stage execution."""
+        payload = deepcopy(sample_composition_dict)
+        payload["output"]["format"] = "png-sequence"
+        payload["output"]["width"] = 320
+        payload["output"]["height"] = 180
+        payload["output"]["fps"] = 31
+        render_id = await _create_render_with_input(
+            pipeline_session_factory,
+            pipeline_workspace,
+            payload,
+        )
+
+        ctx = {
+            "session_factory": pipeline_session_factory,
+            "render_service": mock_service,
+            "workspace_manager": pipeline_workspace,
+        }
+
+        await run_render(ctx, render_id)
+
+        async with pipeline_session_factory() as session:
+            render = await render_crud.get_render_by_id(session, render_id)
+            assert render is not None
+            assert render.status == RenderStatus.FAILED.value
+            assert render.error_code == ErrorCode.COMPOSITION_LIMIT_EXCEEDED.value
             assert render.renderer == "editly"
 
         mock_service.stage_validate_and_expand.assert_not_called()

@@ -21,6 +21,7 @@ from app.renderers.capabilities import (
     validate_renderer_capabilities,
 )
 from app.services.ffmpeg_progress import compute_progress_percent, parse_time_from_line
+from app.services.limits import LimitExceededError, validate_composition_limits
 from app.services.render_service import RenderService, RenderServiceError
 from app.services.webhook_service import dispatch_webhook
 from app.storage.base import ArtifactType
@@ -159,6 +160,27 @@ async def run_render(ctx: dict[str, Any], render_id: str) -> None:
                 renderer=exc.renderer,
                 error_code=exc.code,
                 context=exc.to_context(),
+            )
+            return
+
+        try:
+            validate_composition_limits(composition, settings)
+        except LimitExceededError as exc:
+            await _mark_failed(
+                session_factory,
+                render_id,
+                ErrorCode(exc.violation.code),
+                exc.violation.message,
+                log_collector,
+                workspace,
+                renderer=renderer_selection.renderer,
+            )
+            await logger.aerror(
+                "worker_composition_limit_validation_failed",
+                render_id=render_id,
+                renderer=renderer_selection.renderer,
+                error_code=exc.violation.code,
+                context=exc.violation.to_context(),
             )
             return
 

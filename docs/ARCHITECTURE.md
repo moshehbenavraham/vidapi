@@ -45,6 +45,7 @@ Render Worker (ARQ consumer)
   |   |   |   |-- FFmpeg (invoked by Editly)
   |   |   |
   |   |   |-- Audio Mixer (FFmpeg post-process for detached audio)
+  |   |   |-- Output Postprocessor (FFmpeg WebM, GIF, PNG sequence finishing)
   |   |   |-- Poster Generator (FFmpeg frame extraction)
   |   |   |-- Webhook Service (HMAC-signed callbacks + retries)
   |   |-- Storage Adapter (persist artifacts)
@@ -131,6 +132,11 @@ Local Filesystem (render artifacts)
 - **Tech**: FFmpeg complex filter graph (-c:v copy), two-pass architecture
 - **Location**: `app/services/audio_mixer.py`
 
+### Output Postprocessor
+- **Purpose**: Converts the Editly MP4 intermediate into requested WebM, GIF, or PNG sequence outputs and writes output metadata
+- **Tech**: FFmpeg subprocess with explicit timeout, bounded stderr logs, deterministic PNG manifests, and zip archives
+- **Location**: `app/services/output_postprocess.py`, `app/services/output_formats.py`
+
 ### Poster Generator
 - **Purpose**: Extracts a frame from rendered video as a JPEG poster
 - **Tech**: FFmpeg subprocess
@@ -193,11 +199,12 @@ Local Filesystem (render artifacts)
 14. Compiled Editly JSON + replay metadata written to workspace
 15. Editly invoked as Node subprocess with timeout; progress parsed from FFmpeg stderr
 16. Detached audio clips mixed via FFmpeg post-processing when needed
-17. Poster extracted from output via FFmpeg
-18. Artifacts persisted to storage
-19. Render status updated to `succeeded` or `failed`
-20. Webhook delivery is queued for terminal states when configured
-21. Client polls GET `/v1/renders/{id}` for status, progress, and download URL
+17. Output postprocessor keeps MP4 or converts the MP4 intermediate to WebM, GIF, or a PNG sequence zip and manifest
+18. Poster extracted from the MP4 intermediate via FFmpeg
+19. Artifacts and output metadata persisted to storage and database
+20. Render status updated to `succeeded` or `failed`
+21. Webhook delivery is queued for terminal states when configured
+22. Client polls GET `/v1/renders/{id}` for status, progress, output metadata, and download URL
 
 ### Cancellation Flow
 
@@ -242,6 +249,7 @@ Same pipeline stages run synchronously within the API request when `RENDER_MODE=
 | Worker drives status transitions | Stateless service methods | Required for progress tracking and cancellation |
 | Cooperative cancellation via DB flag | Not ARQ abort | Renderer-agnostic, easier to test |
 | Two-pass audio mixing | FFmpeg post-process | Editly audioTracks lacks per-track timing; -c:v copy avoids re-encoding |
+| MP4 intermediate for non-MP4 outputs | FFmpeg finishing step | Keeps Editly as the default renderer while enabling WebM, GIF, and PNG sequence artifacts |
 | Workspace isolation per job | Separate WorkspaceManager | Single responsibility, concurrent safety |
 | Xvfb in worker container | Virtual framebuffer | Editly's gl module needs an OpenGL context |
 | Template renders pin version at submission | Stored active version pointer | Reproducible template renders and stable audit trail |

@@ -684,13 +684,14 @@ def generate_replay_metadata(
     output_path: Path,
     workspace: Path,
     *,
+    requested_output: dict[str, Any] | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     """Capture Editly executable path, args, env, and paths for manual re-run."""
     if settings is None:
         settings = get_settings()
 
-    return {
+    metadata: dict[str, Any] = {
         "renderer": "editly",
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "command": settings.editly_bin,
@@ -703,6 +704,30 @@ def generate_replay_metadata(
         "output_path": str(output_path),
         "workspace": str(workspace),
         "timeout_seconds": settings.editly_timeout_seconds,
+    }
+    if requested_output is not None:
+        metadata["requested_output"] = requested_output
+    return metadata
+
+
+def build_requested_output_replay_metadata(
+    composition: Composition,
+    *,
+    intermediate_path: Path,
+) -> dict[str, Any]:
+    """Return safe output facts for replay metadata."""
+    return {
+        "format": composition.output.format.value,
+        "preset": (
+            composition.output.preset.value
+            if composition.output.preset is not None
+            else None
+        ),
+        "width": composition.output.width,
+        "height": composition.output.height,
+        "fps": composition.output.fps,
+        "quality": composition.output.quality.value,
+        "intermediate_path": str(intermediate_path),
     }
 
 
@@ -856,6 +881,10 @@ class EditlyRenderer:
             spec_path,
             Path(output_path),
             workspace,
+            requested_output=build_requested_output_replay_metadata(
+                composition,
+                intermediate_path=Path(output_path),
+            ),
             settings=self._settings,
         )
         replay_path = workspace / "replay.json"

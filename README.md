@@ -119,6 +119,7 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 | `DELETE` | `/v1/renders/{id}` | Cancel a queued or running render |
 | `GET` | `/v1/renders/{id}/download` | Download rendered output |
 | `GET` | `/v1/renders/{id}/poster` | Download or redirect to a render poster |
+| `GET` | `/v1/renders/{id}/artifacts/manifest.json` | Download PNG sequence manifest metadata |
 
 ### Operational Endpoints
 
@@ -157,10 +158,21 @@ their adapters are implemented.
 
 VidAPI validates renderer capabilities before direct render jobs are persisted,
 queued, or compiled. Unsupported renderers return `UNSUPPORTED_RENDERER`.
-Unsupported renderer-feature combinations, such as requesting `webm` output
-from Editly, return `UNSUPPORTED_RENDERER_FEATURE` with bounded context. See
+Unsupported renderer-feature combinations return `UNSUPPORTED_RENDERER_FEATURE`
+with bounded context. See
 [Renderer Capabilities](docs/renderer-capabilities.md) for the support matrix
 and extension contract.
+
+### Output Formats And Presets
+
+`output.format` supports `mp4`, `webm`, `gif`, and `png-sequence`. Editly
+produces a deterministic MP4 intermediate; WebM, GIF, and PNG sequence outputs
+are finished with FFmpeg before storage. PNG sequence downloads are zip archives
+and expose `manifest.json` through the render artifact endpoint.
+
+`output.preset` supports `tiktok`, `reels`, `shorts`, `youtube`, `square-ad`,
+and `preview-low`. Explicit `output.width` and `output.height` override preset
+dimensions, while omitted FPS and quality values use preset defaults.
 
 ### API Authentication
 
@@ -184,6 +196,11 @@ MAX_RENDER_DURATION_SECONDS=120
 MAX_OUTPUT_WIDTH=1920
 MAX_OUTPUT_HEIGHT=1920
 MAX_FPS=60
+MAX_GIF_DURATION_SECONDS=15
+MAX_GIF_FPS=30
+MAX_PNG_SEQUENCE_DURATION_SECONDS=10
+MAX_PNG_SEQUENCE_FPS=30
+MAX_PNG_SEQUENCE_FRAMES=300
 MAX_TRACKS_PER_RENDER=50
 MAX_CLIPS_PER_RENDER=50
 MAX_ASSETS_PER_RENDER=100
@@ -201,6 +218,7 @@ and a `Retry-After` header.
 - [Development Guide](docs/development.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Renderer Capabilities](docs/renderer-capabilities.md)
+- [Output Formats](docs/output-formats.md)
 - [Deployment](docs/deployment.md)
 - [Environments](docs/environments.md)
 - [Operations](docs/operations.md)

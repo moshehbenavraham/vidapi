@@ -4,7 +4,7 @@
 **Sessions**: 6 (initial estimate)
 **Estimated Duration**: 12-24 days
 
-**Progress**: 1/6 sessions (17%)
+**Progress**: 2/6 sessions (33%)
 
 ---
 
@@ -19,7 +19,7 @@ Expand VidAPI's creative ceiling and renderer performance options while preservi
 | Session | Name | Status | Est. Tasks | Validated |
 |---------|------|--------|------------|-----------|
 | 01 | Renderer Capability Registry | Completed | ~18 | 2026-05-05 |
-| 02 | Output Formats and Presets | Not Started | ~20 | - |
+| 02 | Output Formats and Presets | Completed | ~20 | 2026-05-05 |
 | 03 | Captions and Poster Customization | Not Started | ~18 | - |
 | 04 | Advanced Transitions and Feature Validation | Not Started | ~18 | - |
 | 05 | Native FFmpeg Renderer Subset | Not Started | ~22 | - |
@@ -30,12 +30,13 @@ Expand VidAPI's creative ceiling and renderer performance options while preservi
 ## Completed Sessions
 
 - Session 01: Renderer Capability Registry
+- Session 02: Output Formats and Presets
 
 ---
 
 ## Upcoming Sessions
 
-- Session 02: Output Formats and Presets
+- Session 03: Captions and Poster Customization
 
 ---
 

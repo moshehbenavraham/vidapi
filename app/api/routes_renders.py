@@ -377,6 +377,7 @@ async def get_render(
 
     url = await url_resolver.output_url(render)
     poster = await url_resolver.poster_url(render)
+    output = await url_resolver.output_metadata(render)
 
     return RenderResponse(
         id=render.id,
@@ -385,6 +386,7 @@ async def get_render(
         progress=render.progress,
         url=url,
         poster=poster,
+        output=output,
         template_id=render.template_id,
         template_version_id=render.template_version_id,
         created_at=render.created_at,
@@ -437,8 +439,9 @@ async def download_render(
         artifact_type=ArtifactType.OUTPUT,
         storage=storage,
         url_resolver=url_resolver,
-        filename=f"{render_id}.mp4",
+        filename=render.output_filename or f"{render_id}.mp4",
         disposition="attachment",
+        media_type=render.output_media_type,
     )
 
 
@@ -481,6 +484,47 @@ async def download_poster(
     )
 
 
+@router.get(
+    "/renders/{render_id}/artifacts/{artifact_name}",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
+)
+async def download_render_artifact(
+    render_id: str,
+    artifact_name: str,
+    session: DBSessionDep,
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+) -> Response:
+    """Stream or redirect a safe render artifact by deterministic name."""
+    render = await render_crud.get_render_by_id(session, render_id)
+    if render is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Render {render_id} not found",
+        )
+
+    if artifact_name != ArtifactType.MANIFEST.value or not render.output_manifest_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_name} not found for render {render_id}",
+        )
+
+    return await _artifact_response(
+        render_id=render_id,
+        artifact_uri=render.output_manifest_path,
+        artifact_type=ArtifactType.MANIFEST,
+        storage=storage,
+        url_resolver=url_resolver,
+        filename=ArtifactType.MANIFEST.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.MANIFEST),
+    )
+
+
 async def _artifact_response(
     *,
     render_id: str,
@@ -490,6 +534,7 @@ async def _artifact_response(
     url_resolver: StorageUrlResolverDep,
     filename: str,
     disposition: str,
+    media_type: str | None = None,
 ) -> Response:
     redirect_url = await url_resolver.endpoint_redirect_url(
         render_id,
@@ -521,6 +566,6 @@ async def _artifact_response(
     }
     return StreamingResponse(
         storage.iter_uri(artifact_uri),
-        media_type=artifact_media_type(artifact_type),
+        media_type=media_type or artifact_media_type(artifact_type),
         headers=headers,
     )

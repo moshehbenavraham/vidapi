@@ -47,6 +47,7 @@ class S3Storage:
         self._scratch = LocalStorage(workspace_root=workspace_root)
         self._bucket = bucket.strip()
         self._object_prefix = self._normalize_prefix(object_prefix)
+        self._max_attempts = max_attempts
         self._client = client or self._build_client(
             region=region,
             endpoint_url=endpoint_url,
@@ -381,7 +382,11 @@ class S3Storage:
         key: str,
         artifact: str | None = None,
     ) -> StorageError:
-        context: dict[str, str] = {"bucket": self._bucket, "key": key}
+        context: dict[str, str] = {
+            "bucket": self._bucket,
+            "key": key,
+            "max_attempts": str(self._max_attempts),
+        }
         if artifact is not None:
             context["artifact"] = artifact
         if isinstance(exc, ClientError):

@@ -6,6 +6,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from app.models.composition import Composition
+from app.models.output_artifacts import RenderOutputMetadata
 
 # ---------------------------------------------------------------------------
 # Render Status Enum with State Machine
@@ -118,6 +119,7 @@ class RenderResponse(BaseModel):
     progress: int = Field(default=0, ge=0, le=100)
     url: str | None = None
     poster: str | None = None
+    output: RenderOutputMetadata | None = None
     duration: float | None = None
     template_id: str | None = None
     template_version_id: str | None = None

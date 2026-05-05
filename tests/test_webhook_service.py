@@ -15,6 +15,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 from app.core.config import Settings
 from app.db.models import Render
 from app.db.webhook_models import WebhookAttempt  # noqa: F401 - registers table
+from app.models.composition import OutputFormat
+from app.models.output_artifacts import RenderOutputMetadata
 from app.services.webhook_service import (
     build_headers,
     build_storage_aware_webhook_payload,
@@ -35,6 +37,19 @@ class FakeWebhookUrlResolver:
         if render.poster_path:
             return "https://cdn.example.com/poster.jpg"
         return None
+
+    async def output_metadata(self, render: Render) -> RenderOutputMetadata | None:
+        if not render.output_format:
+            return None
+        return RenderOutputMetadata(
+            format=OutputFormat(render.output_format),
+            media_type=render.output_media_type or "application/octet-stream",
+            filename=render.output_filename or "output.bin",
+            frame_count=render.output_frame_count,
+            manifest_url="https://cdn.example.com/manifest.json"
+            if render.output_manifest_path
+            else None,
+        )
 
 
 def _make_render(**overrides) -> Render:
@@ -89,6 +104,23 @@ class TestBuildWebhookPayload:
 
         assert payload["completed_at"] is None
 
+    def test_payload_includes_output_metadata(self) -> None:
+        render = _make_render(
+            output_format="webm",
+            output_media_type="video/webm",
+            output_filename="render_test123.webm",
+        )
+
+        payload = build_webhook_payload(event="render.succeeded", render=render)
+
+        assert payload["output"] == {
+            "format": "webm",
+            "media_type": "video/webm",
+            "filename": "render_test123.webm",
+            "frame_count": None,
+            "manifest_url": None,
+        }
+
     @pytest.mark.asyncio
     async def test_storage_aware_payload_uses_resolved_urls(self) -> None:
         render = _make_render()
@@ -101,6 +133,28 @@ class TestBuildWebhookPayload:
 
         assert payload["url"] == "https://cdn.example.com/output.mp4"
         assert payload["poster"] == "https://cdn.example.com/poster.jpg"
+
+    @pytest.mark.asyncio
+    async def test_storage_aware_payload_uses_resolved_output_metadata(self) -> None:
+        render = _make_render(
+            output_format="png-sequence",
+            output_media_type="application/zip",
+            output_filename="render_test123.zip",
+            output_frame_count=2,
+            output_manifest_path="/data/renders/render_test123/manifest.json",
+        )
+
+        payload = await build_storage_aware_webhook_payload(
+            event="render.succeeded",
+            render=render,
+            url_resolver=FakeWebhookUrlResolver(),  # type: ignore[arg-type]
+        )
+
+        assert payload["output"]["format"] == "png-sequence"
+        assert payload["output"]["frame_count"] == 2
+        assert payload["output"]["manifest_url"] == (
+            "https://cdn.example.com/manifest.json"
+        )
 
 
 # ---- T015: HMAC signing tests ----

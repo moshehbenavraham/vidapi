@@ -22,6 +22,7 @@ class ErrorCode(StrEnum):
     QUEUE_SATURATED = "QUEUE_SATURATED"
     REQUEST_BODY_TOO_LARGE = "REQUEST_BODY_TOO_LARGE"
     LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
+    COMPOSITION_LIMIT_EXCEEDED = "COMPOSITION_LIMIT_EXCEEDED"
     MEDIA_LIMIT_EXCEEDED = "MEDIA_LIMIT_EXCEEDED"
     UNSUPPORTED_RENDERER = "UNSUPPORTED_RENDERER"
     UNSUPPORTED_RENDERER_FEATURE = "UNSUPPORTED_RENDERER_FEATURE"
@@ -81,7 +82,7 @@ def _register_defaults() -> None:
         UnsupportedRendererFeatureError,
         ErrorCode.UNSUPPORTED_RENDERER_FEATURE,
     )
-    register_exception(LimitExceededError, ErrorCode.LIMIT_EXCEEDED)
+    register_exception(LimitExceededError, ErrorCode.COMPOSITION_LIMIT_EXCEEDED)
     register_exception(MergeError, ErrorCode.MERGE_ERROR)
     register_exception(TimeoutError, ErrorCode.RENDER_TIMEOUT)
     register_exception(asyncio.TimeoutError, ErrorCode.RENDER_TIMEOUT)

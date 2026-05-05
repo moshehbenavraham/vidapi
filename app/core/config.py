@@ -163,6 +163,13 @@ class Settings(BaseSettings):
     max_output_width: int = Field(default=1920, ge=1, le=16_384)
     max_output_height: int = Field(default=1920, ge=1, le=16_384)
     max_fps: int = Field(default=60, ge=1, le=240)
+    max_gif_duration_seconds: int = Field(default=15, ge=1, le=86_400)
+    max_gif_fps: int = Field(default=30, ge=1, le=240)
+    max_gif_pixels: int = Field(default=2_073_600, ge=1, le=268_435_456)
+    max_png_sequence_duration_seconds: int = Field(default=10, ge=1, le=86_400)
+    max_png_sequence_fps: int = Field(default=30, ge=1, le=240)
+    max_png_sequence_frames: int = Field(default=300, ge=1, le=1_000_000)
+    max_png_sequence_pixels: int = Field(default=2_073_600, ge=1, le=268_435_456)
     max_clips_per_render: int = Field(default=50, ge=1, le=10_000)
     max_tracks_per_render: int = Field(default=50, ge=1, le=1_000)
     max_assets_per_render: int = Field(default=100, ge=1, le=10_000)
@@ -217,6 +224,7 @@ class Settings(BaseSettings):
 
     ffmpeg_bin: str = "ffmpeg"
     audio_mix_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    output_postprocess_timeout_seconds: int = Field(default=120, ge=1, le=3600)
     audio_normalization_enabled: bool = False
     audio_fade_duration_seconds: float = Field(default=1.0, gt=0.0)
     subprocess_kill_grace_seconds: float = Field(default=5.0, gt=0.0, le=60.0)

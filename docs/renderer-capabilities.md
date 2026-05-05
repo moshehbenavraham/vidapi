@@ -25,14 +25,13 @@ VidAPI error envelope.
 | Feature | Supported values |
 |---------|------------------|
 | Asset types | `video`, `image`, `text`, `audio`, `color` |
-| Output formats | `mp4` |
+| Output formats | `mp4`, `webm`, `gif`, `png-sequence` |
 | Transitions | `fade_in`, `fade_out`, `crossfade` |
 | Captions | not supported yet |
 | Poster controls | not supported yet |
 
-The public schema may contain future output formats or renderer names before
-the backing adapter exists. Capability validation is the boundary that decides
-whether a parsed composition is renderable now.
+Editly always renders an MP4 intermediate. WebM, GIF, and PNG sequence outputs
+are supported through the shared FFmpeg output post-processing path.
 
 ## Error Semantics
 
@@ -45,8 +44,9 @@ Renderer capability failures use the standard VidAPI managed error envelope:
     "message": "Renderer does not support requested feature.",
     "context": {
       "renderer": "editly",
-      "feature": "output.format",
-      "requested": "webm"
+      "renderer": "hyperframes",
+      "reason": "unavailable",
+      "available_renderers": ["editly"]
     }
   }
 }

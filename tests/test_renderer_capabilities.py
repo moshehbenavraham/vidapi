@@ -7,7 +7,6 @@ from app.renderers.capabilities import (
     DEFAULT_RENDERER,
     EDITLY_CAPABILITY,
     UnsupportedRendererError,
-    UnsupportedRendererFeatureError,
     available_renderer_names,
     known_renderer_names,
     select_renderer,
@@ -42,7 +41,12 @@ def test_renderer_registry_exposes_known_and_available_names() -> None:
     assert available_renderer_names() == ("editly",)
     assert known_renderer_names() == ("editly", "ffmpeg-native", "hyperframes")
     assert EDITLY_CAPABILITY.available is True
-    assert EDITLY_CAPABILITY.output_formats == {"mp4"}
+    assert EDITLY_CAPABILITY.output_formats == {
+        "gif",
+        "mp4",
+        "png-sequence",
+        "webm",
+    }
 
 
 @pytest.mark.parametrize("requested", [None, "auto", "editly"])
@@ -83,28 +87,27 @@ def test_validate_renderer_capabilities_accepts_supported_editly_composition() -
     assert selection.renderer == "editly"
 
 
-def test_validate_renderer_capabilities_rejects_unsupported_output_format() -> None:
-    composition = _composition(output={"format": "webm", "width": 1280, "height": 720})
+@pytest.mark.parametrize("output_format", ["mp4", "webm", "gif", "png-sequence"])
+def test_validate_renderer_capabilities_accepts_implemented_output_formats(
+    output_format: str,
+) -> None:
+    composition = _composition(
+        output={"format": output_format, "width": 1280, "height": 720}
+    )
 
-    with pytest.raises(UnsupportedRendererFeatureError) as exc_info:
-        validate_renderer_capabilities(composition)
+    selection = validate_renderer_capabilities(composition)
 
-    exc = exc_info.value
-    context = exc.to_context()
-    assert exc.code == "UNSUPPORTED_RENDERER_FEATURE"
-    assert context["renderer"] == "editly"
-    assert context["feature"] == "output.format"
-    assert context["requested"] == "webm"
-    assert context["supported"] == ["mp4"]
+    assert selection.renderer == "editly"
 
 
 def test_capability_error_context_does_not_include_asset_or_callback_urls() -> None:
     composition = _composition(
+        renderer="not-a-renderer",
         output={"format": "gif", "width": 1280, "height": 720},
         callback="https://callback.example.com/hook?token=secret",
     )
 
-    with pytest.raises(UnsupportedRendererFeatureError) as exc_info:
+    with pytest.raises(UnsupportedRendererError) as exc_info:
         validate_renderer_capabilities(composition)
 
     context_text = repr(exc_info.value.to_context())

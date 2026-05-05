@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import (
     BaseModel,
@@ -29,6 +29,15 @@ class OutputFormat(StrEnum):
     GIF = "gif"
     WEBM = "webm"
     PNG_SEQUENCE = "png-sequence"
+
+
+class OutputPreset(StrEnum):
+    TIKTOK = "tiktok"
+    REELS = "reels"
+    SHORTS = "shorts"
+    YOUTUBE = "youtube"
+    SQUARE_AD = "square-ad"
+    PREVIEW_LOW = "preview-low"
 
 
 class ResolutionPreset(StrEnum):
@@ -128,9 +137,68 @@ QUALITY_TABLE: dict[QualityPreset, tuple[int, str]] = {
 }
 
 
+class OutputPresetDefaults(NamedTuple):
+    width: int
+    height: int
+    aspect_ratio: AspectRatio
+    fps: int
+    quality: QualityPreset
+
+
+OUTPUT_PRESET_TABLE: dict[OutputPreset, OutputPresetDefaults] = {
+    OutputPreset.TIKTOK: OutputPresetDefaults(
+        width=1080,
+        height=1920,
+        aspect_ratio=AspectRatio.AR_9_16,
+        fps=30,
+        quality=QualityPreset.HIGH,
+    ),
+    OutputPreset.REELS: OutputPresetDefaults(
+        width=1080,
+        height=1920,
+        aspect_ratio=AspectRatio.AR_9_16,
+        fps=30,
+        quality=QualityPreset.HIGH,
+    ),
+    OutputPreset.SHORTS: OutputPresetDefaults(
+        width=1080,
+        height=1920,
+        aspect_ratio=AspectRatio.AR_9_16,
+        fps=30,
+        quality=QualityPreset.HIGH,
+    ),
+    OutputPreset.YOUTUBE: OutputPresetDefaults(
+        width=1920,
+        height=1080,
+        aspect_ratio=AspectRatio.AR_16_9,
+        fps=30,
+        quality=QualityPreset.HIGH,
+    ),
+    OutputPreset.SQUARE_AD: OutputPresetDefaults(
+        width=1080,
+        height=1080,
+        aspect_ratio=AspectRatio.AR_1_1,
+        fps=30,
+        quality=QualityPreset.MEDIUM,
+    ),
+    OutputPreset.PREVIEW_LOW: OutputPresetDefaults(
+        width=640,
+        height=360,
+        aspect_ratio=AspectRatio.AR_16_9,
+        fps=24,
+        quality=QualityPreset.LOW,
+    ),
+}
+
+
 def resolve_quality(quality: QualityPreset) -> tuple[int, str]:
     """Return (crf, ffmpeg_preset) for a quality preset."""
     return QUALITY_TABLE[quality]
+
+
+def resolve_output_preset(preset: OutputPreset) -> OutputPresetDefaults:
+    """Return output defaults for a named publishing preset."""
+    return OUTPUT_PRESET_TABLE[preset]
 
 
 def resolve_resolution(
@@ -327,6 +395,7 @@ class Timeline(BaseModel):
 
 class Output(BaseModel):
     format: OutputFormat = OutputFormat.MP4
+    preset: OutputPreset | None = None
     width: int | None = Field(default=None, gt=0)
     height: int | None = Field(default=None, gt=0)
     resolution: ResolutionPreset | None = None
@@ -336,23 +405,48 @@ class Output(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_dimensions(self) -> Output:
+        self._apply_preset_defaults()
         if self.width is not None and self.height is not None:
             return self
         if self.resolution is not None and self.aspect_ratio is not None:
             w, h = resolve_resolution(self.resolution, self.aspect_ratio)
-            object.__setattr__(self, "width", w)
-            object.__setattr__(self, "height", h)
+            if self.width is None:
+                object.__setattr__(self, "width", w)
+            if self.height is None:
+                object.__setattr__(self, "height", h)
             return self
         if self.resolution is not None and self.aspect_ratio is None:
             ar = AspectRatio.AR_16_9
             w, h = resolve_resolution(self.resolution, ar)
-            object.__setattr__(self, "width", w)
-            object.__setattr__(self, "height", h)
+            if self.width is None:
+                object.__setattr__(self, "width", w)
+            if self.height is None:
+                object.__setattr__(self, "height", h)
+            return self
+        if self.preset is not None:
+            preset_defaults = resolve_output_preset(self.preset)
+            if self.width is None:
+                object.__setattr__(self, "width", preset_defaults.width)
+            if self.height is None:
+                object.__setattr__(self, "height", preset_defaults.height)
             return self
         if self.width is None and self.height is None:
             object.__setattr__(self, "width", 1920)
             object.__setattr__(self, "height", 1080)
         return self
+
+    def _apply_preset_defaults(self) -> None:
+        if self.preset is None:
+            return
+
+        preset_defaults = resolve_output_preset(self.preset)
+        fields_set = self.model_fields_set
+        if self.aspect_ratio is None:
+            object.__setattr__(self, "aspect_ratio", preset_defaults.aspect_ratio)
+        if "fps" not in fields_set:
+            object.__setattr__(self, "fps", preset_defaults.fps)
+        if "quality" not in fields_set:
+            object.__setattr__(self, "quality", preset_defaults.quality)
 
     @property
     def crf(self) -> int:

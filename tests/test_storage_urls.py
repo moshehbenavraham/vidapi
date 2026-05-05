@@ -29,6 +29,9 @@ def _render(**overrides) -> Render:
         "id": "render_abc123",
         "status": "succeeded",
         "output_path": "/tmp/output.mp4",
+        "output_format": "mp4",
+        "output_media_type": "video/mp4",
+        "output_filename": "render_abc123.mp4",
         "poster_path": "/tmp/poster.jpg",
         "completed_at": datetime(2026, 5, 5, 12, 0, 0, tzinfo=UTC),
     }
@@ -145,6 +148,31 @@ async def test_public_mode_builds_public_s3_url() -> None:
     assert url == "https://cdn.example.com/base/renders/render_abc123/output.mp4"
     assert "access-key" not in url
     assert "secret-key" not in url
+
+
+@pytest.mark.asyncio
+async def test_output_metadata_includes_manifest_url_in_proxy_mode(
+    tmp_path: Path,
+) -> None:
+    storage = LocalStorage(workspace_root=tmp_path)
+    resolver = StorageUrlResolver(
+        storage=storage,
+        url_mode=StorageUrlMode.PROXY,
+        signed_url_expiry_seconds=900,
+    )
+
+    metadata = await resolver.output_metadata(
+        _render(
+            output_format="png-sequence",
+            output_media_type="application/zip",
+            output_filename="render_abc123.zip",
+            output_frame_count=2,
+            output_manifest_path="/tmp/manifest.json",
+        )
+    )
+
+    assert metadata is not None
+    assert metadata.manifest_url == "/v1/renders/render_abc123/artifacts/manifest.json"
 
 
 @pytest.mark.asyncio

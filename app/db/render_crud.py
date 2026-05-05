@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from app.db.models import Render
+from app.models.output_artifacts import StoredOutputMetadata
 from app.models.render import RenderStatus
 
 
@@ -357,6 +358,53 @@ async def update_render_paths(
     if renderer is not None:
         render.renderer = renderer
 
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def update_render_output_metadata(
+    session: AsyncSession,
+    render_id: str,
+    *,
+    metadata: StoredOutputMetadata,
+    output_path: str | None = None,
+) -> Render | None:
+    """Persist output artifact metadata on a render record atomically."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    if output_path is not None:
+        render.output_path = output_path
+    render.output_format = metadata.format.value
+    render.output_media_type = metadata.media_type
+    render.output_filename = metadata.filename
+    render.output_frame_count = metadata.frame_count
+    render.output_manifest_path = metadata.manifest_path
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def clear_render_output_metadata(
+    session: AsyncSession,
+    render_id: str,
+) -> Render | None:
+    """Clear output artifact metadata after a failed publish or finish step."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    render.output_format = None
+    render.output_media_type = None
+    render.output_filename = None
+    render.output_frame_count = None
+    render.output_manifest_path = None
     render.updated_at = datetime.now(tz=UTC)
 
     session.add(render)

@@ -11,6 +11,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 from app.api.deps import get_session, get_storage_backend, get_storage_url_resolver
 from app.db import render_crud
 from app.main import create_app
+from app.models.composition import OutputFormat
+from app.models.output_artifacts import StoredOutputMetadata
 from app.models.render import RenderStatus
 from app.services.merge import MergeError, expand_merge_variables
 from app.storage.base import ArtifactType, StorageBackend, StorageUrlMode
@@ -162,21 +164,23 @@ class TestPostRenders:
         assert body["error"]["context"]["renderer"] == "unknown-renderer"
 
     @pytest.mark.asyncio
-    async def test_unsupported_output_format_returns_stable_error(
+    async def test_png_sequence_fps_limit_returns_stable_error(
         self,
         client: AsyncClient,
         sample_composition: dict,
     ):
         payload = deepcopy(sample_composition)
         payload["output"]["format"] = "png-sequence"
+        payload["output"]["width"] = 320
+        payload["output"]["height"] = 180
+        payload["output"]["fps"] = 31
 
         response = await client.post("/v1/renders", json=payload)
 
         assert response.status_code == 422
         body = response.json()
-        assert body["error"]["code"] == "UNSUPPORTED_RENDERER_FEATURE"
-        assert body["error"]["context"]["feature"] == "output.format"
-        assert body["error"]["context"]["requested"] == "png-sequence"
+        assert body["error"]["code"] == "COMPOSITION_LIMIT_EXCEEDED"
+        assert body["error"]["context"]["field"] == "output.png_sequence.fps"
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +222,42 @@ class TestGetRender:
         if data["status"] == "succeeded":
             assert data["url"] is not None
             assert "/download" in data["url"]
+
+    @pytest.mark.asyncio
+    async def test_succeeded_render_has_output_metadata(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"webm-bytes",
+            suffix=".webm",
+            media_type="video/webm",
+        )
+        await render_crud.update_render_output_metadata(
+            db_session,
+            render_id,
+            metadata=StoredOutputMetadata(
+                format=OutputFormat.WEBM,
+                media_type="video/webm",
+                filename=f"{render_id}.webm",
+            ),
+            output_path=output_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        response = await client.get(f"/v1/renders/{render_id}")
+
+        assert response.status_code == 200
+        output = response.json()["output"]
+        assert output["format"] == "webm"
+        assert output["media_type"] == "video/webm"
+        assert output["filename"] == f"{render_id}.webm"
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +313,81 @@ class TestDownloadRender:
         assert response.status_code == 200
         assert response.content == b"video-bytes"
         assert response.headers["content-disposition"].startswith("attachment")
+
+    @pytest.mark.asyncio
+    async def test_proxy_download_uses_output_metadata_headers(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"webm-bytes",
+            suffix=".webm",
+            media_type="video/webm",
+        )
+        await render_crud.update_render_output_metadata(
+            db_session,
+            render_id,
+            metadata=StoredOutputMetadata(
+                format=OutputFormat.WEBM,
+                media_type="video/webm",
+                filename=f"{render_id}.webm",
+            ),
+            output_path=output_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        response = await client.get(f"/v1/renders/{render_id}/download")
+
+        assert response.status_code == 200
+        assert response.content == b"webm-bytes"
+        assert response.headers["content-type"].startswith("video/webm")
+        assert f'filename="{render_id}.webm"' in response.headers["content-disposition"]
+
+    @pytest.mark.asyncio
+    async def test_manifest_artifact_endpoint_streams_metadata(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"zip-bytes",
+            suffix=".zip",
+            media_type="application/zip",
+        )
+        manifest_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.MANIFEST,
+            b'{"frame_count": 2}',
+        )
+        await render_crud.update_render_output_metadata(
+            db_session,
+            render_id,
+            metadata=StoredOutputMetadata(
+                format=OutputFormat.PNG_SEQUENCE,
+                media_type="application/zip",
+                filename=f"{render_id}.zip",
+                frame_count=2,
+                manifest_path=manifest_uri,
+            ),
+            output_path=output_uri,
+        )
+
+        response = await client.get(f"/v1/renders/{render_id}/artifacts/manifest.json")
+
+        assert response.status_code == 200
+        assert response.content == b'{"frame_count": 2}'
+        assert response.headers["content-type"].startswith("application/json")
 
     @pytest.mark.asyncio
     async def test_poster_endpoint_streams_storage_artifact(
