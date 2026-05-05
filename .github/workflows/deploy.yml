@@ -17,6 +17,8 @@ jobs:
     name: Deploy placeholder and smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      VIDAPI_SMOKE_API_KEY: vidapi-smoke-key
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,7 +44,15 @@ jobs:
 
       - name: Generate production env file
         run: |
-          cat > .env.production.example <<'EOF'
+          smoke_api_key_hash=$(python3 - <<'PY'
+          import hashlib
+          import os
+
+          print(hashlib.sha256(os.environ["VIDAPI_SMOKE_API_KEY"].encode()).hexdigest())
+          PY
+          )
+
+          cat > .env.production.example <<EOF
           APP_NAME=VidAPI
           APP_VERSION=0.1.1
           ENVIRONMENT=production
@@ -62,7 +72,7 @@ jobs:
           REDIS_REQUIRE_TLS_IN_PRODUCTION=false
 
           API_KEY_AUTH_ENABLED=true
-          API_KEY_HASHES=0000000000000000000000000000000000000000000000000000000000000000
+          API_KEY_HASHES=${smoke_api_key_hash}
           ALLOWED_HOSTS=["localhost","127.0.0.1","api","testserver"]
           CORS_ORIGINS=["http://localhost","http://localhost:8000"]
 
@@ -138,6 +148,7 @@ jobs:
 
           response=$(curl -sf -X POST http://localhost:8000/v1/renders \
             -H "Content-Type: application/json" \
+            -H "X-API-Key: ${VIDAPI_SMOKE_API_KEY}" \
             -d '{
               "timeline": {
                 "background": "#000000",
