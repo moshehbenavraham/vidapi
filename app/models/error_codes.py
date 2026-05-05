@@ -22,6 +22,8 @@ class ErrorCode(StrEnum):
     RENDER_CANCELLED = "RENDER_CANCELLED"
     WORKER_UNEXPECTED_ERROR = "WORKER_UNEXPECTED_ERROR"
     INVALID_COMPOSITION = "INVALID_COMPOSITION"
+    TEMPLATE_EXPANSION_ERROR = "TEMPLATE_EXPANSION_ERROR"
+    TEMPLATE_VARIABLE_ERROR = "TEMPLATE_VARIABLE_ERROR"
 
 
 _EXCEPTION_MAP: dict[type, ErrorCode] = {}
@@ -54,6 +56,10 @@ def _register_defaults() -> None:
     from app.renderers.base import CompileError, RenderError
     from app.services.merge import MergeError
     from app.services.render_service import RenderServiceError
+    from app.services.template_engine import (
+        TemplateExpansionError,
+        TemplateVariableError,
+    )
 
     register_exception(CompileError, ErrorCode.COMPILE_ERROR)
     register_exception(RenderError, ErrorCode.RENDER_ERROR)
@@ -64,6 +70,8 @@ def _register_defaults() -> None:
     register_exception(OSError, ErrorCode.STORAGE_ERROR)
     register_exception(RenderServiceError, ErrorCode.RENDER_ERROR)
     register_exception(asyncio.CancelledError, ErrorCode.RENDER_CANCELLED)
+    register_exception(TemplateExpansionError, ErrorCode.TEMPLATE_EXPANSION_ERROR)
+    register_exception(TemplateVariableError, ErrorCode.TEMPLATE_VARIABLE_ERROR)
 
 
 import asyncio  # noqa: E402

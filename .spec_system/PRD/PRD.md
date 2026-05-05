@@ -1039,7 +1039,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 |-------|------|----------|--------|
 | 00 | Foundation | 5 | Complete (5/5) |
 | 01 | Async Jobs and Multi-track | 5 | Complete (5/5) |
-| 02 | Templates and Polish | 5 | Not Started |
+| 02 | Templates and Polish | 5 | In Progress (2/5) |
 | 03 | Production Hardening | TBD | Not Started |
 | 04 | Advanced Rendering | TBD | Not Started |
 

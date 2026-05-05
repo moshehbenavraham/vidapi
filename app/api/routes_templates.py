@@ -4,23 +4,39 @@ import json
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
+from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
 
-from app.api.deps import DBSessionDep, TemplateServiceDep
+from app.api.deps import (
+    ArqPoolDep,
+    DBSessionDep,
+    SettingsDep,
+    TemplateServiceDep,
+)
+from app.db import render_crud
 from app.db.template_models import TemplateVersion
+from app.models.render import RenderStatus
 from app.models.template import (
     CreateTemplateRequest,
     CreateTemplateResponse,
     TemplateListItem,
     TemplateListResponse,
+    TemplateRenderRequest,
+    TemplateRenderResponse,
     TemplateResponse,
     TemplateVersionResponse,
     UpdateTemplateRequest,
+)
+from app.services.template_engine import (
+    TemplateExpansionError,
+    TemplateVariableError,
 )
 from app.services.template_service import (
     TemplateAlreadyDeletedError,
     TemplateDeletedError,
     TemplateNotFoundError,
 )
+from app.workers.render_worker import enqueue_render
 
 logger = structlog.get_logger(__name__)
 
@@ -228,3 +244,124 @@ async def delete_template(
         "status": "deleted",
         "detail": "Template soft-deleted successfully",
     }
+
+
+@router.post(
+    "/templates/{template_id}/renders",
+    response_model=TemplateRenderResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def render_template(
+    template_id: str,
+    body: TemplateRenderRequest,
+    template_service: TemplateServiceDep,
+    session: DBSessionDep,
+    settings: SettingsDep,
+    arq_pool: ArqPoolDep,
+) -> TemplateRenderResponse:
+    """Render a template with merge data.
+
+    Validates merge variables, expands the template composition via Jinja2,
+    creates a render record with template references, and enqueues for
+    processing.
+    """
+    try:
+        (
+            expanded_composition,
+            tmpl_id,
+            version_id,
+            expanded_dict,
+        ) = await template_service.render_from_template(
+            session, template_id, body.merge
+        )
+    except TemplateNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template {template_id} not found",
+        ) from exc
+    except TemplateDeletedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Template {template_id} is deleted and cannot be rendered",
+        ) from exc
+    except TemplateVariableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": str(exc), "errors": exc.errors},
+        ) from exc
+    except TemplateExpansionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": str(exc), "details": exc.details},
+        ) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Expanded composition failed validation",
+                "errors": [str(e) for e in exc.errors()],
+            },
+        ) from exc
+
+    if body.callback:
+        expanded_dict["callback"] = body.callback
+
+    render = await render_crud.create_render(
+        session,
+        template_id=tmpl_id,
+        template_version_id=version_id,
+    )
+    render_id = render.id
+
+    from app.api.deps import get_local_storage
+
+    storage = get_local_storage()
+    workspace = await storage.create_workspace(render_id)
+
+    input_path = workspace / "input.json"
+    input_path.write_text(
+        expanded_composition.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    expanded_path = workspace / "expanded.json"
+    expanded_path.write_text(
+        json.dumps(expanded_dict, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
+
+    await render_crud.update_render_paths(
+        session,
+        render_id,
+        input_path=str(input_path),
+        expanded_path=str(expanded_path),
+    )
+
+    if settings.render_mode == "async":
+        if arq_pool is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Render queue pool not initialized.",
+            )
+        try:
+            await enqueue_render(arq_pool, render_id)
+        except (RedisConnectionError, OSError) as exc:
+            await render_crud.update_render_status(
+                session,
+                render_id,
+                RenderStatus.FAILED,
+                error_code="QUEUE_UNAVAILABLE",
+                error_message="Redis is unreachable; cannot enqueue render job",
+                stage="failed",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Render queue is unavailable. Please retry later.",
+            ) from exc
+
+    return TemplateRenderResponse(
+        id=render.id,
+        status=RenderStatus.QUEUED.value,
+        progress=0,
+        template_id=tmpl_id,
+        template_version_id=version_id,
+        created_at=render.created_at,
+    )

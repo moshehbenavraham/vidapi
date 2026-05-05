@@ -90,3 +90,21 @@ class CreateTemplateResponse(BaseModel):
     active_version: TemplateVersionResponse
     created_at: datetime
     updated_at: datetime
+
+
+class TemplateRenderRequest(BaseModel):
+    """Client request body for POST /v1/templates/{id}/renders."""
+
+    merge: dict[str, Any] = Field(default_factory=dict)
+    callback: str | None = None
+
+
+class TemplateRenderResponse(BaseModel):
+    """Response for POST /v1/templates/{id}/renders."""
+
+    id: str
+    status: str
+    progress: int = 0
+    template_id: str
+    template_version_id: str
+    created_at: datetime

@@ -10,9 +10,17 @@ from app.db.models import Render
 from app.models.render import RenderStatus
 
 
-async def create_render(session: AsyncSession) -> Render:
+async def create_render(
+    session: AsyncSession,
+    *,
+    template_id: str | None = None,
+    template_version_id: str | None = None,
+) -> Render:
     """Create a new render record in QUEUED status."""
-    render = Render()
+    render = Render(
+        template_id=template_id,
+        template_version_id=template_version_id,
+    )
     session.add(render)
     await session.commit()
     await session.refresh(render)

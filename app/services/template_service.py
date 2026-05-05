@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import template_crud
 from app.db.template_models import Template, TemplateVersion
 from app.models.composition import Composition
+from app.services.template_engine import (
+    TemplateExpansionError,
+    expand_template,
+    validate_variable_schema,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -155,3 +161,55 @@ class TemplateService:
 
         await logger.ainfo("template_deleted", template_id=template.id)
         return template
+
+    async def render_from_template(
+        self,
+        session: AsyncSession,
+        template_id: str,
+        merge: dict[str, Any],
+    ) -> tuple[Composition, str, str, dict[str, Any]]:
+        """Fetch template, validate merge vars, expand composition.
+
+        Returns (expanded_composition, template_id, template_version_id,
+        expanded_dict) for the caller to persist and enqueue.
+
+        Raises TemplateNotFoundError, TemplateDeletedError,
+        TemplateVariableError, or TemplateExpansionError on failure.
+        """
+        template = await template_crud.get_template_by_id(session, template_id)
+        if template is None:
+            raise TemplateNotFoundError(template_id)
+        if template.is_deleted:
+            raise TemplateDeletedError(template_id)
+
+        active_version = await template_crud.get_active_version(session, template)
+        if active_version is None:
+            raise TemplateExpansionError(
+                f"Template {template_id} has no active version"
+            )
+
+        variable_schema: dict[str, Any] | None = None
+        if active_version.variable_schema:
+            variable_schema = json.loads(active_version.variable_schema)
+
+        validated_merge = validate_variable_schema(variable_schema, merge)
+
+        composition_dict: dict[str, Any] = json.loads(active_version.composition)
+
+        expanded_dict = expand_template(composition_dict, validated_merge)
+
+        expanded_composition = Composition.model_validate(expanded_dict)
+
+        await logger.ainfo(
+            "template_render_prepared",
+            template_id=template.id,
+            version_id=active_version.id,
+            variable_count=len(validated_merge),
+        )
+
+        return (
+            expanded_composition,
+            template.id,
+            active_version.id,
+            expanded_dict,
+        )

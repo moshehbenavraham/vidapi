@@ -119,6 +119,8 @@ class RenderResponse(BaseModel):
     url: str | None = None
     poster: str | None = None
     duration: float | None = None
+    template_id: str | None = None
+    template_version_id: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -143,6 +145,8 @@ class RenderListItem(BaseModel):
     id: str
     status: RenderStatus
     progress: int = Field(default=0, ge=0, le=100)
+    template_id: str | None = None
+    template_version_id: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

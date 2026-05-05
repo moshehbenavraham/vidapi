@@ -54,6 +54,9 @@ class Render(SQLModel, table=True):
     replay_path: str | None = Field(default=None)
     log_path: str | None = Field(default=None)
 
+    template_id: str | None = Field(default=None, index=True)
+    template_version_id: str | None = Field(default=None)
+
     error_code: str | None = Field(default=None)
     error_message: str | None = Field(default=None)
 
