@@ -23,7 +23,6 @@
 The text renderer requires at least one of these font families:
 
 - Inter (preferred) -- `fonts-inter` on Debian/Ubuntu
-- Roboto -- `fonts-roboto` on Debian/Ubuntu
 - Noto Sans -- `fonts-noto` on Debian/Ubuntu
 - DejaVu Sans -- `fonts-dejavu-core` on Debian/Ubuntu
 
@@ -31,7 +30,7 @@ The text renderer requires at least one of these font families:
 
 - [ ] API runs at `http://localhost:8000`
 - [ ] Health check passes: `curl http://localhost:8000/v1/health`
-- [ ] Tests pass: `pytest` (336+ tests, no Redis required)
+- [ ] Tests pass: `pytest` (full suite, no Redis required)
 - [ ] Lint passes: `ruff check .`
 - [ ] Types pass: `mypy app/`
 

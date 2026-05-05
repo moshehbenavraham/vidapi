@@ -3,10 +3,22 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from app.db.template_models import Template, TemplateVersion
+
+
+async def _commit_and_refresh(session: AsyncSession, *instances: object) -> None:
+    try:
+        await session.commit()
+    except SQLAlchemyError:
+        await session.rollback()
+        raise
+
+    for instance in instances:
+        await session.refresh(instance)
 
 
 async def create_template(
@@ -35,9 +47,7 @@ async def create_template(
 
     session.add(template)
     session.add(version)
-    await session.commit()
-    await session.refresh(template)
-    await session.refresh(version)
+    await _commit_and_refresh(session, template, version)
     return template, version
 
 
@@ -148,7 +158,11 @@ async def update_template(
             variable_schema=vs_json,
         )
         session.add(new_version)
-        await session.flush()
+        try:
+            await session.flush()
+        except SQLAlchemyError:
+            await session.rollback()
+            raise
         template.active_version_id = new_version.id
 
     if variable_schema_json is not None and composition_json is None:
@@ -159,8 +173,7 @@ async def update_template(
 
     template.updated_at = now
     session.add(template)
-    await session.commit()
-    await session.refresh(template)
+    await _commit_and_refresh(session, template)
     if new_version is not None:
         await session.refresh(new_version)
     return template, new_version
@@ -187,6 +200,5 @@ async def soft_delete_template(
     template.is_deleted = True
     template.updated_at = datetime.now(tz=UTC)
     session.add(template)
-    await session.commit()
-    await session.refresh(template)
+    await _commit_and_refresh(session, template)
     return template

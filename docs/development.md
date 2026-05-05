@@ -36,16 +36,37 @@
 
 ## Database
 
-1. Start: Database auto-creates on first API startup (`data/vidapi.db`)
-2. Migrate: `alembic upgrade head`
-3. Reset: `alembic downgrade base && alembic upgrade head`
+VidAPI reads database configuration from `DATABASE_URL`.
 
-SQLite is used for development. PostgreSQL support is planned for Phase 03.
+SQLite remains the default for local development and tests:
+
+```bash
+DATABASE_URL=sqlite+aiosqlite:///./data/vidapi.db
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+PostgreSQL is supported through the asyncpg driver:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://vidapi:vidapi@localhost:5432/vidapi
+alembic upgrade head
+DATABASE_AUTO_CREATE=false ENVIRONMENT=production uvicorn app.main:app
+```
+
+Legacy `postgres://` and plain `postgresql://` URLs are normalized to
+`postgresql+asyncpg://` by application settings.
+
+Reset a disposable local database with:
+
+```bash
+alembic downgrade base && alembic upgrade head
+```
 
 ## Testing
 
 ```bash
-pytest                    # Run all tests (336+)
+pytest                    # Run the full test suite
 pytest -v                 # Verbose output
 pytest --tb=short         # Short tracebacks
 pytest tests/test_segment_compiler.py  # Run specific test file
@@ -74,6 +95,11 @@ pre-commit install
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/vidapi.db` | Database connection string |
+| `DATABASE_AUTO_CREATE` | `true` | Allow local/test startup to create missing tables |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `10` | Per-attempt database connection timeout |
+| `DATABASE_CONNECT_RETRIES` | `3` | Startup database retry attempts |
+| `DATABASE_CONNECT_RETRY_BACKOFF_SECONDS` | `0.5` | Initial startup database retry backoff |
+| `ENVIRONMENT` | `development` | `development`, `test`, or `production` startup guard |
 | `STORAGE_ROOT` | `./data` | Root directory for render artifacts |
 | `DEBUG` | `false` | Enable debug logging |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
@@ -81,10 +107,22 @@ pre-commit install
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection for ARQ queue |
 | `EDITLY_BIN` | `editly` | Path to Editly binary |
 | `EDITLY_TIMEOUT_SECONDS` | `600` | Editly subprocess timeout |
+| `EDITLY_FAST_MODE` | `false` | Disable some Editly safety checks for faster local runs |
 | `FFMPEG_BIN` | `ffmpeg` | Path to FFmpeg binary |
 | `AUDIO_MIX_TIMEOUT_SECONDS` | `120` | FFmpeg audio mixing timeout |
+| `AUDIO_NORMALIZATION_ENABLED` | `false` | Enable optional final audio normalization |
+| `AUDIO_FADE_DURATION_SECONDS` | `1.0` | Default fade window for soundtrack effects |
 | `PROGRESS_UPDATE_INTERVAL_SECONDS` | `2.0` | Minimum interval between progress DB writes |
 | `ASSET_DOWNLOAD_TIMEOUT_SECONDS` | `60` | Remote asset download timeout |
 | `ASSET_ALLOW_HTTP` | `false` | Allow HTTP (non-HTTPS) asset URLs |
 | `WORKSPACE_CLEANUP_ENABLED` | `true` | Clean up job workspaces after render |
 | `WORKSPACE_CLEANUP_KEEP_ON_FAILURE` | `true` | Preserve workspace on failed renders for debugging |
+| `WEBHOOK_SECRET` | `unset` | HMAC secret for signed webhook payloads |
+| `WEBHOOK_TIMEOUT_SECONDS` | `10` | Webhook delivery timeout |
+| `WEBHOOK_MAX_RETRIES` | `3` | Maximum webhook delivery attempts |
+| `WEBHOOK_RETRY_DELAYS` | `[1, 10, 60]` | Retry schedule in seconds |
+| `RATE_LIMIT_DEFAULT` | `60/minute` | Default request rate limit |
+| `RATE_LIMIT_RENDER_CREATE` | `10/minute` | Render-create rate limit |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | Backing store for rate-limit buckets |
+| `CORS_ORIGINS` | localhost list | Allowed browser origins |
+| `ALLOWED_HOSTS` | localhost list | Trusted host allowlist |

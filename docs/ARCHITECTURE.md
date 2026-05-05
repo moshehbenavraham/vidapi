@@ -3,9 +3,11 @@
 ## System Overview
 
 VidAPI is a self-hosted FastAPI service that accepts JSON timeline compositions
-and renders video through pluggable renderer backends. The MVP uses Editly
-(a Node.js tool backed by FFmpeg) as the default renderer, invoked as a
-subprocess from an async Python pipeline.
+and renders video through pluggable renderer backends. The current stack uses
+Editly (a Node.js tool backed by FFmpeg) as the default renderer, invoked as a
+subprocess from an async Python pipeline. Templates, webhook delivery, and
+renderer-independent positioning and transitions all sit on top of the same
+public composition schema.
 
 ## Dependency Graph
 
@@ -27,6 +29,7 @@ Render Worker (ARQ consumer)
   |
   |-- Render Service (stage methods)
   |   |-- Merge Service (variable substitution)
+  |   |-- Template Service (CRUD, version pinning, template renders)
   |   |-- Asset Service (fetch, validate, cache)
   |   |   |-- SSRF Validator
   |   |   |-- ffprobe (media validation)
@@ -35,11 +38,13 @@ Render Worker (ARQ consumer)
   |   |-- Renderer (compile + render)
   |   |   |-- Editly Renderer (Node subprocess)
   |   |   |   |-- Segment Compiler (timeline -> sequential clips)
+  |   |   |   |-- Position Resolver (named positions + offsets)
+  |   |   |   |-- Transition Compiler (fade and crossfade boundaries)
   |   |   |   |-- FFmpeg (invoked by Editly)
   |   |   |
   |   |   |-- Audio Mixer (FFmpeg post-process for detached audio)
   |   |   |-- Poster Generator (FFmpeg frame extraction)
-  |   |
+  |   |   |-- Webhook Service (HMAC-signed callbacks + retries)
   |   |-- Storage Adapter (persist artifacts)
   v
 SQLite Database (render metadata)
@@ -83,6 +88,11 @@ Local Filesystem (render artifacts)
 - **Tech**: Python async, structlog context binding
 - **Location**: `app/services/render_service.py`
 
+### Template Service
+- **Purpose**: Manages reusable templates, immutable versions, and template-backed render submission
+- **Tech**: CRUD layer with version pinning and template expansion
+- **Location**: `app/services/template_service.py`
+
 ### Asset Service
 - **Purpose**: Resolves remote/local/text assets with SSRF protection, MIME validation, and caching
 - **Tech**: httpx (async), Pillow (text rendering), ffprobe (media validation)
@@ -98,6 +108,16 @@ Local Filesystem (render artifacts)
 - **Tech**: Pure functions -- collect boundaries, generate segments, map layers
 - **Location**: `app/renderers/editly.py` (functions: `collect_boundaries`, `generate_segments`)
 
+### Position Resolver
+- **Purpose**: Resolves named and coordinate-based positions into normalized renderer coordinates
+- **Tech**: Pure helpers with pixel offsets and clamping
+- **Location**: `app/renderers/position.py`
+
+### Transition Compiler
+- **Purpose**: Emits Editly-compatible fade and crossfade transitions at segment boundaries
+- **Tech**: Renderer-facing transition mapping with composition validation
+- **Location**: `app/renderers/editly.py`
+
 ### Audio Mixer
 - **Purpose**: Post-processes rendered video to mix detached audio clips with correct timing
 - **Tech**: FFmpeg complex filter graph (-c:v copy), two-pass architecture
@@ -107,6 +127,11 @@ Local Filesystem (render artifacts)
 - **Purpose**: Extracts a frame from rendered video as a JPEG poster
 - **Tech**: FFmpeg subprocess
 - **Location**: `app/renderers/poster.py`
+
+### Webhook Service
+- **Purpose**: Delivers terminal-state callbacks with HMAC signatures and retry tracking
+- **Tech**: httpx client, HMAC-SHA256 payload signing, retry schedule persistence
+- **Location**: `app/services/webhook_service.py`
 
 ### Storage Adapter
 - **Purpose**: Persists render artifacts to a deterministic directory structure
@@ -152,14 +177,17 @@ Local Filesystem (render artifacts)
 6. Worker picks up job, creates isolated workspace
 7. Worker drives pipeline: fetching -> compiling -> rendering -> uploading
 8. Assets resolved: remote fetched via httpx, text rendered to PNG, all cached by SHA-256
-9. Segment compiler converts absolute-time timeline to sequential Editly clips
-10. Compiled Editly JSON + replay metadata written to workspace
-11. Editly invoked as Node subprocess with timeout; progress parsed from FFmpeg stderr
-12. Detached audio clips mixed via FFmpeg post-processing (two-pass, -c:v copy)
-13. Poster extracted from output via FFmpeg
-14. Artifacts persisted to storage
-15. Render status updated to `succeeded` or `failed`
-16. Client polls GET `/v1/renders/{id}` for status, progress, and download URL
+9. Template-backed renders expand merge variables before compile and persist `expanded.json`
+10. Segment compiler converts absolute-time timeline to sequential Editly clips
+11. Position resolver and transition compiler normalize renderer-facing layout details
+12. Compiled Editly JSON + replay metadata written to workspace
+13. Editly invoked as Node subprocess with timeout; progress parsed from FFmpeg stderr
+14. Detached audio clips mixed via FFmpeg post-processing when needed
+15. Poster extracted from output via FFmpeg
+16. Artifacts persisted to storage
+17. Render status updated to `succeeded` or `failed`
+18. Webhook delivery is queued for terminal states when configured
+19. Client polls GET `/v1/renders/{id}` for status, progress, and download URL
 
 ### Cancellation Flow
 
@@ -168,6 +196,23 @@ Local Filesystem (render artifacts)
 3. Running jobs: `cancel_requested_at` flag set in DB
 4. Worker checks flag between stages and during stderr streaming
 5. On detection: subprocess terminated (SIGTERM, then SIGKILL), status set to `cancelled`
+
+### Template Render Flow
+
+1. Client creates or updates a template through `/v1/templates`
+2. Client submits merge data to `/v1/templates/{id}/renders`
+3. Service pins the active template version before render creation
+4. Merge variables are expanded against the stored template composition
+5. Render job stores both template references and the expanded composition
+6. Worker runs the standard render pipeline with the expanded input
+
+### Webhook Flow
+
+1. Render reaches a terminal state and an event payload is built
+2. Payload is signed with HMAC-SHA256 when `WEBHOOK_SECRET` is configured
+3. Each delivery attempt is stored in `webhook_attempts`
+4. Failed deliveries retry on the configured schedule
+5. Delivery stops after the retry budget is exhausted
 
 ### Sync Mode (local development without Redis)
 
@@ -189,5 +234,7 @@ Same pipeline stages run synchronously within the API request when `RENDER_MODE=
 | Two-pass audio mixing | FFmpeg post-process | Editly audioTracks lacks per-track timing; -c:v copy avoids re-encoding |
 | Workspace isolation per job | Separate WorkspaceManager | Single responsibility, concurrent safety |
 | Xvfb in worker container | Virtual framebuffer | Editly's gl module needs an OpenGL context |
+| Template renders pin version at submission | Stored active version pointer | Reproducible template renders and stable audit trail |
+| Webhooks are delivered asynchronously | Non-blocking render completion | Render success must not depend on callback success |
 
 See [.spec_system/PRD/PRD.md](.spec_system/PRD/PRD.md) for full architecture decisions.

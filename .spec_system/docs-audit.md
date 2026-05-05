@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-05
 **Project**: VidAPI
-**Audit Mode**: Phase-Focused (Phase 01 "Async Jobs and Multi-track" completed)
+**Audit Mode**: Phase-Focused (Phase 02 "Templates and Polish" completed)
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Category | Required | Found | Status |
 |----------|----------|-------|--------|
-| Root files (README, CONTRIBUTING, LICENSE) | 3 | 3 | All current |
-| /docs/ files | 7 | 7 | All current |
+| Root files (README, CONTRIBUTING, LICENSE) | 3 | 3 | Updated and current |
+| /docs/ files | 7 | 7 | Updated and current |
 | ADRs | 1+ | 2 | Current |
 | Package READMEs | N/A | N/A | Not monorepo |
 
@@ -21,13 +21,13 @@
 
 | File | Changes Made |
 |------|-------------|
-| `README.md` | Added list/cancel endpoints, ARQ+Redis to tech stack, Phase 01 marked complete, test count 336+ |
-| `docs/ARCHITECTURE.md` | Added async worker pipeline, Redis/ARQ, workspace manager, log collector, audio mixer, cancellation flow, 6 new key decisions |
-| `docs/development.md` | Added Redis port, worker command, Docker scripts, 7 new env vars, test count 336+ |
-| `docs/deployment.md` | Rewrote for 3-service Docker Compose stack, added async local dev section, updated health check, removed "planned" items now delivered |
-| `docs/environments.md` | Added sync/async dev modes, RENDER_MODE and REDIS_URL vars, expanded config table |
-| `docs/onboarding.md` | Added Redis and Docker prerequisites, async startup instructions, smoke test |
-| `CONTRIBUTING.md` | Updated test count to 336+ |
+| `README.md` | Marked Phase 02 complete, added template endpoints, updated status and repo summary |
+| `docs/ARCHITECTURE.md` | Documented template service, position/transition compilation, webhook delivery, and template render flow |
+| `docs/development.md` | Added current test wording and runtime settings for audio, webhooks, rate limiting, CORS, and Editly fast mode |
+| `docs/deployment.md` | Kept the async Docker Compose path current and cleaned the CI pipeline summary |
+| `docs/environments.md` | Added production-facing webhook, audio, and host/CORS distinctions |
+| `docs/onboarding.md` | Refreshed prerequisites, fonts, and verification wording |
+| `CONTRIBUTING.md` | Removed stale test-count wording |
 
 ---
 
@@ -63,4 +63,4 @@
 
 ## Next Action
 
-PRD.md defines three remaining unfinished phases (02: Templates and Polish, 03: Production Hardening, 04: Advanced Rendering). After manual testing and LLM audit, run `phasebuild` to create the Phase 02 structure.
+PRD.md defines two remaining unfinished phases (03: Production Hardening, 04: Advanced Rendering). After manual testing and LLM audit, run `phasebuild` to create the Phase 03 structure.

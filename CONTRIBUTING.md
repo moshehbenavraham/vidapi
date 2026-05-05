@@ -23,7 +23,7 @@ Examples: `feat: Add render status polling`, `fix: Handle FFmpeg timeout`
 
 1. Create a feature branch from `develop`
 2. Make changes with clear, atomic commits
-3. Write or update tests (336+ tests and counting)
+3. Write or update tests for the affected code paths
 4. Run quality gates before pushing:
    ```bash
    ruff check . && ruff format --check . && mypy app/ && pytest

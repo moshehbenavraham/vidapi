@@ -20,6 +20,9 @@
 | Log format | Console | Console | Console | JSON |
 | Asset HTTP | Allowed | Allowed | Allowed | HTTPS only |
 | Auth | None | None | None | API key required |
+| Webhook secret | Optional | Optional | Optional | Configured |
+| Audio normalization | Disabled | Disabled | Disabled | Optional |
+| CORS / hosts | Localhost allowlist | Localhost allowlist | Localhost allowlist | Explicit deployment allowlist |
 
 ## Required Environment Variables
 
@@ -29,5 +32,8 @@
 - `REDIS_URL`: Redis connection string (required when `RENDER_MODE=async`)
 - `DEBUG`: Enable debug mode and console log output
 - `LOG_LEVEL`: Logging verbosity (DEBUG, INFO, WARNING, ERROR)
+- `WEBHOOK_SECRET`: HMAC secret for signed callbacks
+- `CORS_ORIGINS`: Explicit list of allowed browser origins
+- `ALLOWED_HOSTS`: Trusted host allowlist for the FastAPI app
 
 See [development.md](development.md) for the full environment variable reference.

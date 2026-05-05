@@ -3,11 +3,23 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from app.db.models import Render
 from app.models.render import RenderStatus
+
+
+async def _commit_and_refresh(session: AsyncSession, *instances: object) -> None:
+    try:
+        await session.commit()
+    except SQLAlchemyError:
+        await session.rollback()
+        raise
+
+    for instance in instances:
+        await session.refresh(instance)
 
 
 async def create_render(
@@ -24,8 +36,7 @@ async def create_render(
         callback_url=callback_url,
     )
     session.add(render)
-    await session.commit()
-    await session.refresh(render)
+    await _commit_and_refresh(session, render)
     return render
 
 
@@ -81,8 +92,7 @@ async def update_render_status(
             render.progress = 100
 
     session.add(render)
-    await session.commit()
-    await session.refresh(render)
+    await _commit_and_refresh(session, render)
     return render
 
 
@@ -134,8 +144,7 @@ async def set_cancel_requested(
     render.updated_at = datetime.now(tz=UTC)
 
     session.add(render)
-    await session.commit()
-    await session.refresh(render)
+    await _commit_and_refresh(session, render)
     return render
 
 
@@ -157,8 +166,7 @@ async def update_render_progress(
     render.updated_at = datetime.now(tz=UTC)
 
     session.add(render)
-    await session.commit()
-    await session.refresh(render)
+    await _commit_and_refresh(session, render)
     return render
 
 
@@ -203,6 +211,5 @@ async def update_render_paths(
     render.updated_at = datetime.now(tz=UTC)
 
     session.add(render)
-    await session.commit()
-    await session.refresh(render)
+    await _commit_and_refresh(session, render)
     return render

@@ -39,9 +39,25 @@ async def test_render_create_rate_limit_returns_retry_after(
     assert health.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_untrusted_host_is_rejected(client: AsyncClient) -> None:
+    response = await client.get(
+        "/v1/health",
+        headers={"host": "evil.example.com"},
+    )
+
+    assert response.status_code == 400
+    assert response.text == "Invalid host header"
+
+
 def test_production_cors_wildcard_rejected() -> None:
     with pytest.raises(ValueError, match="Wildcard CORS"):
         Settings(cors_origins=["*"], debug=False)
+
+
+def test_production_allowed_hosts_wildcard_rejected() -> None:
+    with pytest.raises(ValueError, match="Wildcard allowed_hosts"):
+        Settings(allowed_hosts=["*"], debug=False)
 
 
 def test_debug_cors_wildcard_allowed() -> None:

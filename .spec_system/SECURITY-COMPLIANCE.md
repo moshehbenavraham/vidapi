@@ -1,7 +1,7 @@
 # Security & Compliance
 
 > Cumulative security posture and GDPR compliance record. Updated between phases via carryforward.
-> **Line budget**: 1000 max | **Last updated**: Phase 01 (2026-05-05)
+> **Line budget**: 1000 max | **Last updated**: Phase 02 (2026-05-05)
 
 ---
 
@@ -14,8 +14,8 @@
 | Open Findings | 0 |
 | Critical/High | 0 |
 | Medium/Low | 0 |
-| Phases Audited | 2 |
-| Last Clean Phase | P01 |
+| Phases Audited | 3 |
+| Last Clean Phase | P02 |
 
 ---
 
@@ -51,7 +51,7 @@ No personal data collected or processed.
 | Consent obtained before data storage | N/A | No personal data collected |
 | Data minimization verified | N/A | No personal data in scope |
 | Deletion/erasure path exists | N/A | No personal data stored |
-| No PII in application logs | PASS | Logs contain only render_id (UUID), file paths, hashes, error codes, stage names, and timing metadata |
+| No PII in application logs | PASS | Logs contain only render_id, file paths, hashes, error codes, stage names, and timing metadata |
 | Third-party transfers documented | N/A | No external services contacted beyond user-provided asset URLs; Redis is self-hosted |
 
 ---
@@ -60,16 +60,14 @@ No personal data collected or processed.
 
 ### Current Vulnerabilities
 
-| Package | Version | Severity | CVE | Status |
-|---------|---------|----------|-----|--------|
-| starlette | <0.49.1 | Medium | CVE-2025-54121 | Open (pre-existing P00) |
-| starlette | <0.49.1 | Medium | CVE-2025-62727 | Open (pre-existing P00) |
+None known.
 
-**Dependencies audited (Phase 01):**
-- arq 0.28.0, redis[hiredis] 5.3.1 -- no known CVEs (added P01-S01)
-- fastapi, uvicorn, pydantic, pydantic-settings -- web framework stack
+**Dependencies audited (Phase 02):**
+- fastapi 0.136.1, starlette 0.52.1, pydantic, pydantic-settings -- web framework stack
+- arq 0.28.0, redis[hiredis] 5.3.1 -- queue and cache stack
 - sqlmodel, aiosqlite, alembic -- database stack
-- httpx -- async HTTP client for asset fetching
+- httpx -- async HTTP client for webhook delivery
+- Jinja2 3.1.x -- template expansion engine
 - Pillow -- text-to-image rendering
 - structlog -- structured logging
 - System-level: FFmpeg 6.1.1, Node.js v24.14.0, Editly (Node subprocess)
@@ -79,7 +77,13 @@ No personal data collected or processed.
 
 ## Resolved Findings
 
-No resolved findings yet.
+| Phase | Finding | Resolution |
+|-------|---------|------------|
+| P02 | Starlette CVE-2025-54121 / CVE-2025-62727 backlog | Upgraded FastAPI and raised the Starlette floor to `>=0.49.1`; local resolution reached `starlette==0.52.1`.
+| P02 | Wildcard production CORS | Production startup now rejects wildcard origins unless `DEBUG=true`.
+| P02 | Unbounded render submissions | `POST /v1/renders` now uses bounded rate limiting with structured `429` responses.
+| P01 | No render workspace cleanup | WorkspaceManager now supports configurable cleanup on success and failure.
+| P01 | Synchronous render in POST handler | ARQ async worker pipeline with `RENDER_MODE` toggle.
 
 ---
 
@@ -89,6 +93,7 @@ No resolved findings yet.
 |-------|----------|----------|------|-----------------|-----------------|
 | P00 | 5 | PASS | N/A | 0 | 0 |
 | P01 | 5 | PASS | N/A | 0 | 0 |
+| P02 | 5 | PASS | N/A | 0 | 3 |
 
 ---
 
@@ -96,13 +101,10 @@ No resolved findings yet.
 
 Actionable items for upcoming phases based on cumulative findings.
 
-1. **Upgrade starlette >= 0.49.1** to resolve CVE-2025-54121 and CVE-2025-62727. These are medium-severity pre-existing issues that should be addressed in the next maintenance pass.
-2. **Add Redis AUTH for production** (Phase 03): Docker Redis currently runs without a password. Production deployments must require authentication via requirepass or ACL.
-3. **Enable Redis TLS for production** (Phase 03): REDIS_URL supports rediss:// scheme for encrypted connections. Enforce in production environments.
-4. **Add Docker secrets support** (Phase 03): Production credentials should use Docker secrets or Vault rather than environment variables in .env files.
-5. **Restrict CORS origins for production** (Phase 02+): Default wildcard ["*"] must be replaced with specific allowed domains.
-6. **Scope render access to authenticated users** (Phase 03): Currently any client with a render_id can access status and output.
-7. **Implement rate limiting on POST /v1/renders** (Phase 02): Prevent resource exhaustion via rapid submissions.
+1. **Add Redis AUTH for production** (Phase 03): Docker Redis currently runs without a password. Production deployments must require authentication via `requirepass` or ACL.
+2. **Enable Redis TLS for production** (Phase 03): `REDIS_URL` supports `rediss://` for encrypted connections. Enforce it in production environments.
+3. **Add Docker secrets support** (Phase 03): Production credentials should use Docker secrets or Vault rather than environment variables in `.env` files.
+4. **Scope render access to authenticated users** (Phase 03): Any client with a `render_id` can currently access status and output.
 
 ---
 

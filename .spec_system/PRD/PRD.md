@@ -1040,7 +1040,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 | 00 | Foundation | 5 | Complete (5/5) |
 | 01 | Async Jobs and Multi-track | 5 | Complete (5/5) |
 | 02 | Templates and Polish | 5 | Complete (5/5) |
-| 03 | Production Hardening | TBD | Not Started |
+| 03 | Production Hardening | 5 | In Progress (1/5) |
 | 04 | Advanced Rendering | TBD | Not Started |
 
 ## Phase 00: Foundation
@@ -1169,6 +1169,18 @@ Make the service safe and operable outside local development.
 - Docker Compose can run API, worker, Redis, Postgres, and MinIO.
 - Production-like storage URLs work.
 - Common asset attack cases are rejected by tests.
+
+### Sessions
+
+| Session | Name | Est. Tasks |
+|---------|------|------------|
+| 01 | PostgreSQL Persistence and Alembic Migrations | ~20 |
+| 02 | S3-compatible Storage and Download Modes | ~20 |
+| 03 | API Key Authentication and Access Control | ~18 |
+| 04 | Limits, Resource Controls, and Asset Security Hardening | ~20 |
+| 05 | Operational Visibility and Production Stack | ~20 |
+
+Session stubs: `.spec_system/PRD/phase_03/`
 
 ## Phase 04: Advanced Rendering
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
@@ -19,7 +20,7 @@ from app.api.deps import (
     get_render_service,
     get_template_service,
 )
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings, reset_settings_cache
 from app.db.session import get_session, set_engine
 from app.main import create_app
 from app.renderers.base import CompiledRender, RenderArtifact
@@ -32,24 +33,37 @@ from app.storage.local import LocalStorage
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def reset_app_settings_cache() -> Iterator[None]:
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return get_settings()
 
 
 @pytest.fixture
-async def db_engine():
+async def db_engine() -> AsyncIterator[AsyncEngine]:
+    set_engine(None)
     engine = create_async_engine(
-        "sqlite+aiosqlite://",
+        "sqlite+aiosqlite:///:memory:",
         echo=False,
         future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
     set_engine(engine)
-    yield engine
-    await engine.dispose()
-    set_engine(None)  # type: ignore[arg-type]
+    try:
+        yield engine
+    finally:
+        set_engine(None)
+        await engine.dispose()
 
 
 @pytest.fixture

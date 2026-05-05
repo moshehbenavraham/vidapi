@@ -2,6 +2,7 @@
 
 Self-hosted Python FastAPI service for programmatic video rendering.
 Accepts JSON timeline compositions and renders video via Editly + FFmpeg.
+Also supports reusable templates, webhook callbacks, and deterministic render artifacts.
 A self-hosted, open-source alternative to Creatomate and JSON2Video.
 
 ## Quick Start (Docker Compose)
@@ -71,13 +72,13 @@ curl http://localhost:8000/v1/health
 |   |-- api/               # Route handlers, dependencies, error handling
 |   |-- core/              # Config (pydantic-settings), logging, security
 |   |-- db/                # SQLModel tables, CRUD, async sessions
-|   |-- models/            # Pydantic composition and render schemas
+|   |-- models/            # Pydantic composition, template, and render schemas
 |   |-- renderers/         # Renderer protocol, Editly bridge, poster gen
-|   |-- services/          # Render pipeline, asset service, SSRF, merge
+|   |-- services/          # Render pipeline, asset, template, and webhook services
 |   |-- storage/           # Storage protocol and local filesystem adapter
 |   \-- workers/           # Background job workers (Phase 01)
 |-- alembic/               # Database migrations
-|-- tests/                 # 336+ tests (schema, security, compiler, API, worker)
+|-- tests/                 # Full schema, security, compiler, API, worker, and integration coverage
 |-- docs/                  # Architecture, development, deployment guides
 |-- Dockerfile.api          # Slim API image (Python + FastAPI)
 |-- Dockerfile.worker       # Full worker image (Python + Node + FFmpeg)
@@ -96,6 +97,17 @@ curl http://localhost:8000/v1/health
 | `GET` | `/v1/renders/{id}` | Get render status, progress, and output URLs |
 | `DELETE` | `/v1/renders/{id}` | Cancel a queued or running render |
 | `GET` | `/v1/renders/{id}/download` | Download rendered output |
+
+### Template Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/templates` | Create a reusable template |
+| `GET` | `/v1/templates` | List templates |
+| `GET` | `/v1/templates/{id}` | Retrieve template metadata and active version |
+| `PUT` | `/v1/templates/{id}` | Update a template by creating a new version |
+| `DELETE` | `/v1/templates/{id}` | Soft-delete or archive a template |
+| `POST` | `/v1/templates/{id}/renders` | Render a template with merge variables |
 
 Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
 
@@ -118,20 +130,21 @@ Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
 - **Editly** - Default video renderer (Node.js subprocess)
 - **FFmpeg** - Video encoding, poster extraction, audio mixing, media probing
 - **Pillow** - Text-to-image rendering with bundled fonts
+- **Jinja2** - Sandboxed template expansion for reusable compositions
 - **httpx** - Async asset downloads with SSRF protection
 - **structlog** - Structured JSON logging
 
 ## Project Status
 
-Phases 00 and 01 are complete. See [PRD](.spec_system/PRD/PRD.md) for
-current progress and roadmap.
+Phases 00, 01, and 02 are complete; Phase 03 is in progress. See
+[PRD](.spec_system/PRD/PRD.md) for current progress and roadmap.
 
 | Phase | Name | Status |
 |-------|------|--------|
 | 00 | Foundation | Complete (5/5 sessions) |
 | 01 | Async Jobs and Multi-track | Complete (5/5 sessions) |
-| 02 | Templates and Polish | Not Started |
-| 03 | Production Hardening | Not Started |
+| 02 | Templates and Polish | Complete (5/5 sessions) |
+| 03 | Production Hardening | In Progress (1/5 sessions) |
 | 04 | Advanced Rendering | Not Started |
 
 ## License

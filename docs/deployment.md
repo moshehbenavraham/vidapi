@@ -40,10 +40,49 @@ RENDER_MODE=async uvicorn app.main:app --reload  # Start API in async mode
 arq app.workers.arq_settings.WorkerSettings      # Start worker (separate terminal)
 ```
 
+## Database Migrations
+
+Production metadata uses PostgreSQL and Alembic-managed schemas. Application
+startup must not create tables in production.
+
+Required production settings:
+
+```bash
+ENVIRONMENT=production
+DATABASE_AUTO_CREATE=false
+DATABASE_URL=postgresql+asyncpg://vidapi:secret@db.example.com:5432/vidapi
+```
+
+Apply migrations before starting new API or worker processes:
+
+```bash
+alembic upgrade head
+uvicorn app.main:app
+```
+
+Rollback on a disposable or explicitly approved database:
+
+```bash
+alembic downgrade -1
+alembic upgrade head
+```
+
+For a disposable PostgreSQL database, run the optional smoke check:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://vidapi:secret@localhost:5432/vidapi_test \
+POSTGRES_MIGRATION_SMOKE_DISPOSABLE=true \
+bash scripts/postgres-migration-smoke.sh
+```
+
+If `DATABASE_AUTO_CREATE=false`, startup verifies database connectivity and the
+Alembic head revision. If migrations are missing or stale, startup fails with an
+actionable error instead of mutating the schema.
+
 ## CI/CD Pipeline
 
 ```
-Push --> Lint/Format/Type Check --> Test (336+ tests) --> Build Docker Image
+Push --> Lint/Format/Type Check --> Test --> Build Docker Image
 ```
 
 GitHub Actions workflows at `.github/workflows/`.
@@ -86,7 +125,6 @@ renderer subprocess failures increase.
 ## Production Deployment (Planned)
 
 Phase 03 will add:
-- PostgreSQL for metadata
 - S3-compatible storage for artifacts
 - API key authentication
-- Rate limiting
+- Operational visibility and production stack wiring

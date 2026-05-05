@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from app.db.webhook_models import WebhookAttempt
+
+
+async def _commit_and_refresh(session: AsyncSession, *instances: object) -> None:
+    try:
+        await session.commit()
+    except SQLAlchemyError:
+        await session.rollback()
+        raise
+
+    for instance in instances:
+        await session.refresh(instance)
 
 
 async def create_attempt(
@@ -26,8 +38,7 @@ async def create_attempt(
         scheduled_at=scheduled_at or datetime.now(tz=UTC),
     )
     session.add(attempt)
-    await session.commit()
-    await session.refresh(attempt)
+    await _commit_and_refresh(session, attempt)
     return attempt
 
 
@@ -59,8 +70,7 @@ async def update_attempt_result(
         attempt.error = error[:500]
 
     session.add(attempt)
-    await session.commit()
-    await session.refresh(attempt)
+    await _commit_and_refresh(session, attempt)
     return attempt
 
 

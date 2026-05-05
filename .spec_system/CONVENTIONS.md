@@ -184,7 +184,7 @@ Platform: GitHub Actions
 | Hosting | Docker | Multi-stage build (Python + Node + FFmpeg) |
 | Database | SQLite (dev) / PostgreSQL (prod) | Async via SQLModel |
 | Local Dev | docker compose up | Port 8000, healthcheck configured |
-| WAF | not configured | Requires reverse proxy or CDN (Cloudflare recommended) |
+| WAF | FastAPI TrustedHostMiddleware | `allowed_hosts` allowlist, invalid Host headers rejected |
 | Rate Limit | Custom middleware | 60/min default, 10/min POST /renders, health exempt |
 | Backup | not configured | - |
 | Deploy | not configured | - |

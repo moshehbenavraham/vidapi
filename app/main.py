@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.errors import register_error_handlers
 from app.api.routes_health import router as health_router
@@ -17,16 +18,39 @@ from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis import close_arq_pool, create_arq_pool
-from app.db.session import create_tables, dispose_engine
+from app.db.session import (
+    DatabaseConfigurationError,
+    DatabaseConnectionError,
+    create_tables,
+    dispose_engine,
+    verify_database_connection,
+    verify_database_migrations,
+)
 
 logger = structlog.get_logger(__name__)
+
+
+async def _prepare_database() -> None:
+    settings = get_settings()
+    try:
+        if settings.database_auto_create:
+            await create_tables()
+            await logger.ainfo("database_auto_create_complete")
+            return
+
+        await verify_database_connection()
+        await verify_database_migrations()
+        await logger.ainfo("database_migrations_verified")
+    except (DatabaseConfigurationError, DatabaseConnectionError) as exc:
+        await logger.aerror("database_startup_failed", error=str(exc))
+        raise
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(log_level=settings.log_level, json_output=not settings.debug)
-    await create_tables()
+    await _prepare_database()
 
     if settings.render_mode == "async":
         await create_arq_pool()
@@ -37,7 +61,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app_name=settings.app_name,
         version=settings.app_version,
         debug=settings.debug,
+        environment=settings.environment,
         render_mode=settings.render_mode,
+        database_auto_create=settings.database_auto_create,
     )
     yield
 
@@ -58,6 +84,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RateLimitMiddleware)
 
     allow_credentials = "*" not in settings.cors_origins
