@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,8 @@ POSTGRESQL_DRIVER_NAMES = frozenset(
     }
 )
 SUPPORTED_DATABASE_DRIVER_NAMES = SQLITE_DRIVER_NAMES | POSTGRESQL_DRIVER_NAMES
+StorageBackendName = Literal["local", "s3"]
+StorageUrlModeName = Literal["proxy", "signed", "public"]
 
 
 def _parse_database_url(database_url: str) -> URL:
@@ -62,6 +65,15 @@ def normalize_database_url(database_url: str) -> str:
     return url.render_as_string(hide_password=False)
 
 
+def _validate_url_has_no_credentials(setting_name: str, value: str) -> None:
+    if not value:
+        return
+    parsed = urlsplit(value)
+    if parsed.username or parsed.password:
+        msg = f"{setting_name} must not include embedded credentials"
+        raise ValueError(msg)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -88,6 +100,26 @@ class Settings(BaseSettings):
     render_workspace_root: Path = Path("data/renders")
     asset_cache_root: Path = Path("data/assets")
     allowed_asset_dirs: list[str] = []
+
+    storage_backend: StorageBackendName = "local"
+    storage_url_mode: StorageUrlModeName = "proxy"
+    storage_signed_url_expiry_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=604800,
+    )
+
+    s3_bucket: str = ""
+    s3_endpoint_url: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_object_prefix: str = "renders"
+    s3_force_path_style: bool = True
+    s3_public_base_url: str = ""
+    s3_connect_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    s3_read_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    s3_max_attempts: int = Field(default=3, ge=1)
 
     allowed_hosts: list[str] = [
         "localhost",
@@ -197,6 +229,37 @@ class Settings(BaseSettings):
             if self.database_auto_create:
                 msg = "DATABASE_AUTO_CREATE must be false when ENVIRONMENT=production"
                 raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_storage_settings(self) -> Self:
+        if self.storage_backend == "s3":
+            if not self.s3_bucket.strip():
+                msg = "STORAGE_BACKEND=s3 requires S3_BUCKET"
+                raise ValueError(msg)
+            if self.environment == "production":
+                if not self.s3_access_key_id.strip():
+                    msg = "STORAGE_BACKEND=s3 requires S3_ACCESS_KEY_ID in production"
+                    raise ValueError(msg)
+                if not self.s3_secret_access_key.strip():
+                    msg = (
+                        "STORAGE_BACKEND=s3 requires S3_SECRET_ACCESS_KEY in production"
+                    )
+                    raise ValueError(msg)
+
+        if self.storage_url_mode == "public":
+            if self.storage_backend == "s3" and not self.s3_public_base_url.strip():
+                msg = (
+                    "STORAGE_URL_MODE=public with STORAGE_BACKEND=s3 requires "
+                    "S3_PUBLIC_BASE_URL"
+                )
+                raise ValueError(msg)
+            _validate_url_has_no_credentials(
+                "S3_PUBLIC_BASE_URL",
+                self.s3_public_base_url,
+            )
+
+        _validate_url_has_no_credentials("S3_ENDPOINT_URL", self.s3_endpoint_url)
         return self
 
 

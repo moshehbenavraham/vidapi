@@ -7,7 +7,7 @@ packages = ["app"]
 
 [project]
 name = "vidapi"
-version = "0.1.16"
+version = "0.1.17"
 description = "Self-hosted FastAPI service for programmatic video rendering"
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,7 @@ dependencies = [
     "arq>=0.26",
     "redis[hiredis]>=5.0",
     "Jinja2>=3.1",
+    "boto3>=1.34,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -77,6 +78,8 @@ disallow_untyped_defs = true
 module = [
     "structlog.*",
     "PIL.*",
+    "boto3.*",
+    "botocore.*",
 ]
 ignore_missing_imports = true
 
