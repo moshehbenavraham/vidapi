@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from jinja2 import StrictUndefined
@@ -152,7 +152,7 @@ def expand_template(
         "template_expanded",
         variable_count=len(variables),
     )
-    return result
+    return cast(dict[str, Any], result)
 
 
 def _walk_and_expand(

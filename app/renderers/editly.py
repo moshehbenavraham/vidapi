@@ -15,6 +15,7 @@ import structlog
 from app.core.config import Settings, get_settings
 from app.models.composition import (
     AudioAsset,
+    AudioEffect,
     Clip,
     ColorAsset,
     Composition,
@@ -95,6 +96,8 @@ def collect_boundaries(tracks: list[Track], total_duration: float) -> list[float
 
     for track in tracks:
         for clip in track.clips:
+            if isinstance(clip.asset, AudioAsset):
+                continue
             boundaries.add(clip.start)
             boundaries.add(clip.start + clip.length)
 
@@ -163,6 +166,8 @@ def compute_total_duration(tracks: list[Track]) -> float:
     max_end = 0.0
     for track in tracks:
         for clip in track.clips:
+            if isinstance(clip.asset, AudioAsset):
+                continue
             end = clip.start + clip.length
             if end > max_end:
                 max_end = end
@@ -421,7 +426,10 @@ def compile_audio_plan(
     audio_refs: list[AudioClipRef],
     soundtrack: AudioAsset | None,
     *,
+    total_duration: float | None = None,
     asset_path_resolver: dict[str, str] | None = None,
+    normalize_audio: bool = False,
+    fade_duration: float = 1.0,
 ) -> AudioMixPlan:
     """Build an AudioMixPlan from collected audio refs and optional soundtrack."""
     sources: list[AudioSource] = []
@@ -437,10 +445,36 @@ def compile_audio_plan(
                 trim_start=soundtrack.trim,
                 trim_duration=None,
                 volume=soundtrack.volume,
+                fade_in_duration=(
+                    fade_duration
+                    if soundtrack.effect
+                    in (AudioEffect.FADE_IN, AudioEffect.FADE_IN_FADE_OUT)
+                    else None
+                ),
+                fade_out_duration=(
+                    fade_duration
+                    if soundtrack.effect
+                    in (AudioEffect.FADE_OUT, AudioEffect.FADE_IN_FADE_OUT)
+                    else None
+                ),
+                total_duration=total_duration,
             )
         )
 
-    for ref in audio_refs:
+    ordered_refs = sorted(
+        audio_refs,
+        key=lambda ref: (round(ref.start, 6), ref.src, round(ref.length, 6)),
+    )
+    for ref in ordered_refs:
+        if total_duration is not None:
+            if ref.start >= total_duration - EPSILON:
+                continue
+            effective_length = min(ref.length, total_duration - ref.start)
+            if effective_length <= EPSILON:
+                continue
+        else:
+            effective_length = ref.length
+
         src_path = ref.src
         if asset_path_resolver:
             src_path = asset_path_resolver.get(src_path, src_path)
@@ -450,12 +484,26 @@ def compile_audio_plan(
                 path=src_path,
                 delay_ms=delay_ms,
                 trim_start=ref.trim,
-                trim_duration=ref.length if ref.trim is not None else None,
+                trim_duration=effective_length,
                 volume=ref.volume,
+                total_duration=effective_length,
             )
         )
 
-    return AudioMixPlan(sources=sources)
+    return AudioMixPlan(
+        sources=sources,
+        total_duration=total_duration,
+        normalize_audio=normalize_audio,
+    )
+
+
+def soundtrack_requires_external_audio(
+    soundtrack: AudioAsset | None,
+    *,
+    normalize_audio: bool = False,
+) -> bool:
+    """Return True when soundtrack behavior needs FFmpeg post-processing."""
+    return soundtrack is not None and (soundtrack.effect is not None or normalize_audio)
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +515,8 @@ def map_soundtrack(soundtrack: AudioAsset | None) -> list[dict[str, Any]]:
     """Map VidAPI soundtrack to Editly audioTracks."""
     if soundtrack is None:
         return []
+    if soundtrack.effect is not None:
+        raise CompileError("Soundtrack effects require external audio post-processing")
 
     track: dict[str, Any] = {
         "path": soundtrack.src,
@@ -474,13 +524,6 @@ def map_soundtrack(soundtrack: AudioAsset | None) -> list[dict[str, Any]]:
 
     if soundtrack.volume < 1.0 - EPSILON:
         track["mixVolume"] = soundtrack.volume
-
-    if soundtrack.effect is not None:
-        track["mixVolume"] = soundtrack.volume
-        if soundtrack.effect.value == "fadeIn":
-            track["cutFrom"] = 0
-        elif soundtrack.effect.value == "fadeOut":
-            pass
 
     return [track]
 
@@ -774,7 +817,12 @@ class EditlyRenderer:
         if not segments:
             raise CompileError("No segments generated from composition")
 
-        use_external = needs_audio_mixing(composition.timeline.tracks)
+        use_external = needs_audio_mixing(
+            composition.timeline.tracks
+        ) or soundtrack_requires_external_audio(
+            composition.timeline.soundtrack,
+            normalize_audio=self._settings.audio_normalization_enabled,
+        )
         audio_plan: AudioMixPlan | None = None
 
         if use_external:
@@ -782,7 +830,10 @@ class EditlyRenderer:
             audio_plan = compile_audio_plan(
                 audio_refs,
                 composition.timeline.soundtrack,
+                total_duration=total_duration,
                 asset_path_resolver=asset_path_resolver,
+                normalize_audio=self._settings.audio_normalization_enabled,
+                fade_duration=self._settings.audio_fade_duration_seconds,
             )
 
         output_filename = f"{render_id}.mp4"

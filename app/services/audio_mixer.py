@@ -35,6 +35,9 @@ class AudioSource:
     trim_start: float | None = None
     trim_duration: float | None = None
     volume: float = 1.0
+    fade_in_duration: float | None = None
+    fade_out_duration: float | None = None
+    total_duration: float | None = None
 
 
 @dataclass(frozen=True)
@@ -43,10 +46,69 @@ class AudioMixPlan:
 
     sources: list[AudioSource] = field(default_factory=list)
     video_has_audio: bool = True
+    total_duration: float | None = None
+    normalize_audio: bool = False
 
     @property
     def is_empty(self) -> bool:
         return len(self.sources) == 0
+
+
+def _validate_source(source: AudioSource) -> None:
+    if not source.path:
+        raise AudioMixError("Cannot mix audio: source path is empty")
+    if source.delay_ms < 0:
+        raise AudioMixError("Cannot mix audio: source delay cannot be negative")
+    if not 0.0 <= source.volume <= 1.0:
+        raise AudioMixError("Cannot mix audio: source volume must be between 0 and 1")
+    if source.trim_start is not None and source.trim_start < 0.0:
+        raise AudioMixError("Cannot mix audio: trim start cannot be negative")
+    if source.trim_duration is not None and source.trim_duration <= 0.0:
+        raise AudioMixError("Cannot mix audio: trim duration must be positive")
+    if source.fade_in_duration is not None and source.fade_in_duration <= 0.0:
+        raise AudioMixError("Cannot mix audio: fade-in duration must be positive")
+    if source.fade_out_duration is not None and source.fade_out_duration <= 0.0:
+        raise AudioMixError("Cannot mix audio: fade-out duration must be positive")
+    if source.total_duration is not None and source.total_duration <= 0.0:
+        raise AudioMixError("Cannot mix audio: source total duration must be positive")
+
+
+def _resolve_source_duration(
+    source: AudioSource,
+    plan: AudioMixPlan,
+) -> float | None:
+    if source.total_duration is not None:
+        return source.total_duration
+    if source.trim_duration is not None:
+        return source.trim_duration
+    return plan.total_duration
+
+
+def _fade_filters(source: AudioSource, plan: AudioMixPlan) -> list[str]:
+    duration = _resolve_source_duration(source, plan)
+    if source.fade_in_duration is None and source.fade_out_duration is None:
+        return []
+    if duration is None:
+        raise AudioMixError("Cannot mix audio: fade requires a bounded duration")
+
+    fade_in = source.fade_in_duration
+    fade_out = source.fade_out_duration
+    if fade_in is not None and fade_out is not None:
+        max_each = duration / 2.0
+        fade_in = min(fade_in, max_each)
+        fade_out = min(fade_out, max_each)
+    elif fade_in is not None:
+        fade_in = min(fade_in, duration)
+    elif fade_out is not None:
+        fade_out = min(fade_out, duration)
+
+    filters: list[str] = []
+    if fade_in is not None and fade_in > 0.0:
+        filters.append(f"afade=t=in:st=0.000000:d={fade_in:.6f}")
+    if fade_out is not None and fade_out > 0.0:
+        start = max(duration - fade_out, 0.0)
+        filters.append(f"afade=t=out:st={start:.6f}:d={fade_out:.6f}")
+    return filters
 
 
 def build_mix_filter_graph(plan: AudioMixPlan) -> tuple[str, int]:
@@ -63,6 +125,7 @@ def build_mix_filter_graph(plan: AudioMixPlan) -> tuple[str, int]:
     input_index = 1
 
     for source in plan.sources:
+        _validate_source(source)
         label = f"a{input_index}"
         chain_parts: list[str] = []
 
@@ -74,11 +137,13 @@ def build_mix_filter_graph(plan: AudioMixPlan) -> tuple[str, int]:
             chain_parts.append(atrim)
             chain_parts.append("asetpts=PTS-STARTPTS")
 
-        if source.delay_ms > 0:
-            chain_parts.append(f"adelay={source.delay_ms}|{source.delay_ms}")
-
         if abs(source.volume - 1.0) > 1e-6:
             chain_parts.append(f"volume={source.volume:.6f}")
+
+        chain_parts.extend(_fade_filters(source, plan))
+
+        if source.delay_ms > 0:
+            chain_parts.append(f"adelay={source.delay_ms}|{source.delay_ms}")
 
         if chain_parts:
             chain = ",".join(chain_parts)
@@ -99,7 +164,11 @@ def build_mix_filter_graph(plan: AudioMixPlan) -> tuple[str, int]:
 
     n = len(mix_inputs)
     mix_input_str = "".join(mix_inputs)
-    filters.append(f"{mix_input_str}amix=inputs={n}:duration=longest[aout]")
+    if plan.normalize_audio:
+        filters.append(f"{mix_input_str}amix=inputs={n}:duration=longest[mixed]")
+        filters.append("[mixed]dynaudnorm[aout]")
+    else:
+        filters.append(f"{mix_input_str}amix=inputs={n}:duration=longest[aout]")
 
     filter_graph = ";".join(filters)
     return filter_graph, total_inputs

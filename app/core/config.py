@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +31,12 @@ class Settings(BaseSettings):
     allowed_asset_dirs: list[str] = []
 
     allowed_hosts: list[str] = ["*"]
-    cors_origins: list[str] = ["*"]
+    cors_origins: list[str] = [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
 
     max_render_duration_seconds: int = 120
     max_output_width: int = 1920
@@ -75,6 +81,8 @@ class Settings(BaseSettings):
 
     ffmpeg_bin: str = "ffmpeg"
     audio_mix_timeout_seconds: int = 120
+    audio_normalization_enabled: bool = False
+    audio_fade_duration_seconds: float = Field(default=1.0, gt=0.0)
 
     progress_update_interval_seconds: float = 2.0
 
@@ -93,7 +101,19 @@ class Settings(BaseSettings):
     webhook_max_retries: int = 3
     webhook_retry_delays: list[int] = [1, 10, 60]
 
+    @model_validator(mode="after")
+    def _validate_production_cors(self) -> Settings:
+        if "*" in self.cors_origins and not self.debug:
+            msg = "Wildcard CORS origins require DEBUG=true"
+            raise ValueError(msg)
+        return self
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def reset_settings_cache() -> None:
+    """Clear cached settings so tests can isolate environment overrides."""
+    get_settings.cache_clear()

@@ -21,7 +21,7 @@
     "2": {
       "name": "Templates and Polish",
       "description": "Template CRUD with immutable versioning, Jinja2 variable substitution, webhook callbacks with HMAC signing and retry, named positions and offsets, and basic fade/crossfade transitions",
-      "status": "in_progress",
+      "status": "complete",
       "session_count": 5
     },
     "3": {
@@ -49,7 +49,8 @@
     "phase02-session01-template-models-and-crud-api",
     "phase02-session02-template-variables-and-rendering",
     "phase02-session03-webhook-delivery-system",
-    "phase02-session04-transitions-and-positioning"
+    "phase02-session04-transitions-and-positioning",
+    "phase02-session05-audio-polish-and-hardening"
   ],
   "next_session_history": [
     {
@@ -255,6 +256,21 @@
     {
       "date": "2026-05-05",
       "session": "phase02-session04-transitions-and-positioning",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase02-session05-audio-polish-and-hardening",
+      "status": "planned"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase02-session05-audio-polish-and-hardening",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase02-session05-audio-polish-and-hardening",
       "status": "completed"
     }
   ]

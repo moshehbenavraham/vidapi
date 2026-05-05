@@ -15,6 +15,12 @@ from app.api.deps import (
 )
 from app.db import render_crud
 from app.db.template_models import TemplateVersion
+from app.models.errors import (
+    CONFLICT_ERROR,
+    NOT_FOUND_ERROR,
+    QUEUE_UNAVAILABLE_ERROR,
+    VALIDATION_ERROR,
+)
 from app.models.render import RenderStatus
 from app.models.template import (
     CreateTemplateRequest,
@@ -63,6 +69,7 @@ def _build_version_response(version: TemplateVersion) -> TemplateVersionResponse
     "/templates",
     response_model=CreateTemplateResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={422: VALIDATION_ERROR},
 )
 async def create_template(
     body: CreateTemplateRequest,
@@ -91,6 +98,7 @@ async def create_template(
 @router.get(
     "/templates",
     response_model=TemplateListResponse,
+    responses={422: VALIDATION_ERROR},
 )
 async def list_templates(
     session: DBSessionDep,
@@ -132,6 +140,10 @@ async def list_templates(
 @router.get(
     "/templates/{template_id}",
     response_model=TemplateResponse,
+    responses={
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
 )
 async def get_template(
     template_id: str,
@@ -167,6 +179,11 @@ async def get_template(
 @router.put(
     "/templates/{template_id}",
     response_model=TemplateResponse,
+    responses={
+        404: NOT_FOUND_ERROR,
+        409: CONFLICT_ERROR,
+        422: VALIDATION_ERROR,
+    },
 )
 async def update_template(
     template_id: str,
@@ -219,6 +236,11 @@ async def update_template(
 @router.delete(
     "/templates/{template_id}",
     status_code=status.HTTP_200_OK,
+    responses={
+        404: NOT_FOUND_ERROR,
+        409: CONFLICT_ERROR,
+        422: VALIDATION_ERROR,
+    },
 )
 async def delete_template(
     template_id: str,
@@ -250,6 +272,12 @@ async def delete_template(
     "/templates/{template_id}/renders",
     response_model=TemplateRenderResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: NOT_FOUND_ERROR,
+        409: CONFLICT_ERROR,
+        422: VALIDATION_ERROR,
+        503: QUEUE_UNAVAILABLE_ERROR,
+    },
 )
 async def render_template(
     template_id: str,

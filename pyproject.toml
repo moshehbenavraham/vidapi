@@ -7,13 +7,14 @@ packages = ["app"]
 
 [project]
 name = "vidapi"
-version = "0.1.14"
+version = "0.1.15"
 description = "Self-hosted FastAPI service for programmatic video rendering"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi==0.115.12",
+    "fastapi==0.136.1",
+    "starlette>=0.49.1,<1.0.0",
     "pydantic==2.11.2",
     "pydantic-settings==2.9.1",
     "uvicorn[standard]==0.34.2",

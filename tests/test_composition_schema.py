@@ -247,6 +247,22 @@ class TestTrackTimeline:
         assert tl.soundtrack is not None
         assert tl.soundtrack.volume == 0.35
 
+    def test_invalid_soundtrack_volume_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="less than or equal"):
+            AudioAsset(
+                type="audio",
+                src="https://example.com/music.mp3",
+                volume=1.5,
+            )
+
+    def test_invalid_soundtrack_effect_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="fadeInFadeOut"):
+            AudioAsset(
+                type="audio",
+                src="https://example.com/music.mp3",
+                effect="pulse",  # type: ignore[arg-type]
+            )
+
 
 # ---------------------------------------------------------------------------
 # Output

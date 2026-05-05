@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.models.composition import (
     AudioAsset,
     Clip,
@@ -15,6 +17,7 @@ from app.renderers.editly import (
     needs_audio_mixing,
 )
 from app.services.audio_mixer import (
+    AudioMixError,
     AudioMixPlan,
     AudioSource,
     build_mix_filter_graph,
@@ -219,6 +222,35 @@ class TestCompileAudioPlan:
         plan = compile_audio_plan([], None)
         assert plan.is_empty is True
 
+    def test_detached_audio_clipped_to_total_duration(self):
+        refs = [
+            AudioClipRef(src="/sfx.wav", start=4.0, length=3.0, trim=None, volume=1.0),
+        ]
+        plan = compile_audio_plan(refs, None, total_duration=5.0)
+        assert len(plan.sources) == 1
+        assert plan.sources[0].trim_duration == 1.0
+        assert plan.sources[0].total_duration == 1.0
+
+    def test_detached_audio_starting_at_total_duration_skipped(self):
+        refs = [
+            AudioClipRef(src="/sfx.wav", start=5.0, length=3.0, trim=None, volume=1.0),
+        ]
+        plan = compile_audio_plan(refs, None, total_duration=5.0)
+        assert plan.is_empty is True
+
+    def test_overlapping_detached_audio_order_is_deterministic(self):
+        refs = [
+            AudioClipRef(src="/b.wav", start=1.0, length=2.0, trim=None, volume=1.0),
+            AudioClipRef(src="/a.wav", start=1.0, length=2.0, trim=None, volume=1.0),
+            AudioClipRef(src="/c.wav", start=0.5, length=1.0, trim=None, volume=1.0),
+        ]
+        plan = compile_audio_plan(refs, None, total_duration=5.0)
+        assert [source.path for source in plan.sources] == [
+            "/c.wav",
+            "/a.wav",
+            "/b.wav",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # build_mix_filter_graph tests
@@ -319,3 +351,68 @@ class TestBuildMixFilterGraph:
         assert "adelay=500|500" in graph
         assert "volume=0.700000" in graph
         assert "asetpts=PTS-STARTPTS" in graph
+
+    def test_soundtrack_fade_in_filter(self):
+        plan = AudioMixPlan(
+            sources=[
+                AudioSource(
+                    path="/music.mp3",
+                    fade_in_duration=1.25,
+                    total_duration=5.0,
+                )
+            ],
+            total_duration=5.0,
+        )
+        graph, _ = build_mix_filter_graph(plan)
+        assert "afade=t=in:st=0.000000:d=1.250000" in graph
+
+    def test_soundtrack_fade_out_filter(self):
+        plan = AudioMixPlan(
+            sources=[
+                AudioSource(
+                    path="/music.mp3",
+                    fade_out_duration=1.5,
+                    total_duration=5.0,
+                )
+            ],
+            total_duration=5.0,
+        )
+        graph, _ = build_mix_filter_graph(plan)
+        assert "afade=t=out:st=3.500000:d=1.500000" in graph
+
+    def test_combined_fades_are_capped_for_short_duration(self):
+        plan = AudioMixPlan(
+            sources=[
+                AudioSource(
+                    path="/music.mp3",
+                    fade_in_duration=2.0,
+                    fade_out_duration=2.0,
+                    total_duration=1.0,
+                )
+            ],
+            total_duration=1.0,
+        )
+        graph, _ = build_mix_filter_graph(plan)
+        assert "afade=t=in:st=0.000000:d=0.500000" in graph
+        assert "afade=t=out:st=0.500000:d=0.500000" in graph
+
+    def test_normalization_filter(self):
+        plan = AudioMixPlan(
+            sources=[AudioSource(path="/music.mp3")],
+            normalize_audio=True,
+        )
+        graph, _ = build_mix_filter_graph(plan)
+        assert "amix=inputs=2:duration=longest[mixed]" in graph
+        assert "[mixed]dynaudnorm[aout]" in graph
+
+    def test_fade_without_duration_raises(self):
+        plan = AudioMixPlan(
+            sources=[AudioSource(path="/music.mp3", fade_out_duration=1.0)],
+        )
+        with pytest.raises(AudioMixError, match="bounded duration"):
+            build_mix_filter_graph(plan)
+
+    def test_invalid_negative_delay_raises(self):
+        plan = AudioMixPlan(sources=[AudioSource(path="/sfx.wav", delay_ms=-1)])
+        with pytest.raises(AudioMixError, match="delay"):
+            build_mix_filter_graph(plan)

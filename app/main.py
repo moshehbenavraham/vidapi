@@ -60,10 +60,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RateLimitMiddleware)
 
+    allow_credentials = "*" not in settings.cors_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

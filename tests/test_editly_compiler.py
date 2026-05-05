@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import Settings
 from app.models.composition import (
     AudioAsset,
+    AudioEffect,
     Clip,
     ColorAsset,
     Composition,
@@ -18,6 +20,7 @@ from app.models.composition import (
     Track,
     VideoAsset,
 )
+from app.renderers.base import CompileError
 from app.renderers.editly import (
     ActiveClip,
     EditlyRenderer,
@@ -199,6 +202,15 @@ class TestSoundtrackMapper:
         result = map_soundtrack(audio)
 
         assert result[0]["mixVolume"] == 0.7
+
+    def test_soundtrack_with_effect_requires_external_audio(self):
+        audio = AudioAsset(
+            type="audio",
+            src="/music.mp3",
+            effect=AudioEffect.FADE_OUT,
+        )
+        with pytest.raises(CompileError, match="external audio"):
+            map_soundtrack(audio)
 
 
 # ---------------------------------------------------------------------------
@@ -745,3 +757,132 @@ class TestEditlyRendererCompileWithAudio:
 
         spec_data = json.loads(result.spec_json)
         assert "audioTracks" in spec_data
+
+    async def test_compile_soundtrack_effect_has_external_plan(self, tmp_path: Path):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=ImageAsset(type="image", src="/bg.png"),
+                                start=0.0,
+                                length=5.0,
+                            ),
+                        ]
+                    ),
+                ],
+                soundtrack=AudioAsset(
+                    type="audio",
+                    src="/music.mp3",
+                    effect=AudioEffect.FADE_OUT,
+                ),
+            ),
+            output=Output(width=1920, height=1080, fps=30),
+        )
+
+        renderer = EditlyRenderer()
+        result = await renderer.compile(comp, tmp_path, render_id="fade-001")
+
+        assert result.audio_mix_plan is not None
+        assert result.audio_mix_plan.sources[0].fade_out_duration == 1.0
+        assert result.audio_mix_plan.sources[0].total_duration == 5.0
+
+        spec_data = json.loads(result.spec_json)
+        assert "audioTracks" not in spec_data
+
+    async def test_compile_soundtrack_normalization_has_external_plan(
+        self, tmp_path: Path
+    ):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=ImageAsset(type="image", src="/bg.png"),
+                                start=0.0,
+                                length=5.0,
+                            ),
+                        ]
+                    ),
+                ],
+                soundtrack=AudioAsset(type="audio", src="/music.mp3"),
+            ),
+            output=Output(width=1920, height=1080, fps=30),
+        )
+
+        renderer = EditlyRenderer(settings=Settings(audio_normalization_enabled=True))
+        result = await renderer.compile(comp, tmp_path, render_id="norm-001")
+
+        assert result.audio_mix_plan is not None
+        assert result.audio_mix_plan.normalize_audio is True
+
+        spec_data = json.loads(result.spec_json)
+        assert "audioTracks" not in spec_data
+
+    async def test_compile_clips_detached_audio_to_video_duration(self, tmp_path: Path):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=ImageAsset(type="image", src="/bg.png"),
+                                start=0.0,
+                                length=5.0,
+                            ),
+                        ]
+                    ),
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=AudioAsset(type="audio", src="/sfx.mp3"),
+                                start=4.0,
+                                length=3.0,
+                            ),
+                        ]
+                    ),
+                ],
+            ),
+            output=Output(width=1920, height=1080, fps=30),
+        )
+
+        renderer = EditlyRenderer()
+        result = await renderer.compile(comp, tmp_path, render_id="clip-001")
+
+        assert result.audio_mix_plan is not None
+        assert result.audio_mix_plan.sources[0].trim_duration == 1.0
+
+    async def test_compile_skips_detached_audio_at_video_duration(self, tmp_path: Path):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=ImageAsset(type="image", src="/bg.png"),
+                                start=0.0,
+                                length=5.0,
+                            ),
+                        ]
+                    ),
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=AudioAsset(type="audio", src="/sfx.mp3"),
+                                start=5.0,
+                                length=3.0,
+                            ),
+                        ]
+                    ),
+                ],
+            ),
+            output=Output(width=1920, height=1080, fps=30),
+        )
+
+        renderer = EditlyRenderer()
+        result = await renderer.compile(comp, tmp_path, render_id="skip-001")
+
+        assert result.audio_mix_plan is not None
+        assert result.audio_mix_plan.is_empty is True

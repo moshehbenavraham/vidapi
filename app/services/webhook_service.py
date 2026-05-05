@@ -103,6 +103,8 @@ async def _deliver_single_attempt(
             attempt_number=attempt_number,
         )
         attempt_id = attempt.id
+        if attempt_id is None:
+            raise RuntimeError("Webhook attempt was not assigned an id")
 
     status_code: int | None = None
     response_excerpt: str | None = None

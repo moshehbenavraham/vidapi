@@ -1039,7 +1039,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 |-------|------|----------|--------|
 | 00 | Foundation | 5 | Complete (5/5) |
 | 01 | Async Jobs and Multi-track | 5 | Complete (5/5) |
-| 02 | Templates and Polish | 5 | In Progress (2/5) |
+| 02 | Templates and Polish | 5 | Complete (5/5) |
 | 03 | Production Hardening | TBD | Not Started |
 | 04 | Advanced Rendering | TBD | Not Started |
 
@@ -1125,6 +1125,8 @@ Make VidAPI useful for repeatable programmatic video generation.
 - Basic transitions: fade in/out and crossfade where supported.
 - Webhook callbacks with signing and retry.
 
+This phase is complete. Archived session artifacts live in `.spec_system/archive/phases/phase_02/`.
+
 ### Exit Criteria
 
 - A product-ad style template can render multiple variations.
@@ -1141,7 +1143,7 @@ Make VidAPI useful for repeatable programmatic video generation.
 | 04 | Transitions and Positioning | ~16 |
 | 05 | Audio Polish and Hardening | ~15 |
 
-Session stubs: `.spec_system/PRD/phase_02/`
+Archived phase artifacts: `.spec_system/archive/phases/phase_02/`
 
 ## Phase 03: Production Hardening
 

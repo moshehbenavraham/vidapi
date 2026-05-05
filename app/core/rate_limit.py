@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -11,12 +13,15 @@ from starlette.responses import JSONResponse, Response
 from app.core.config import get_settings
 
 _EXEMPT_PATHS = {"/health", "/v1/health"}
+_MAX_CLIENT_KEY_LENGTH = 128
+_MAX_FORWARDED_FOR_LENGTH = 512
 
 
 def _parse_rate(rate_str: str) -> tuple[int, int]:
     """Parse rate string like '60/minute' into (count, window_seconds)."""
     count_str, period = rate_str.split("/")
     count = int(count_str)
+    period = period.rstrip("s")
     windows = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
     return count, windows[period]
 
@@ -37,12 +42,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             settings.rate_limit_render_create
         )
         self._buckets: dict[str, _Bucket] = defaultdict(_Bucket)
+        self._lock = asyncio.Lock()
 
     def _get_client_ip(self, request: Request) -> str:
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+            forwarded = forwarded[:_MAX_FORWARDED_FOR_LENGTH]
+            candidate = forwarded.split(",", 1)[0].strip()
+        else:
+            candidate = request.client.host if request.client else "unknown"
+
+        if not candidate or len(candidate) > _MAX_CLIENT_KEY_LENGTH:
+            return "unknown"
+
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            return "unknown"
 
     def _is_rate_limited(
         self, key: str, max_requests: int, window: int
@@ -64,7 +80,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         path = request.url.path
-        if path in _EXEMPT_PATHS:
+        if path.rstrip("/") in _EXEMPT_PATHS:
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
@@ -76,14 +92,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if is_render_create:
             key = f"render:{client_ip}"
-            limited, retry_after = self._is_rate_limited(
-                key, self._render_max, self._render_window
-            )
+            async with self._lock:
+                limited, retry_after = self._is_rate_limited(
+                    key, self._render_max, self._render_window
+                )
         else:
             key = f"default:{client_ip}"
-            limited, retry_after = self._is_rate_limited(
-                key, self._default_max, self._default_window
-            )
+            async with self._lock:
+                limited, retry_after = self._is_rate_limited(
+                    key, self._default_max, self._default_window
+                )
 
         if limited:
             return JSONResponse(
@@ -91,6 +109,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={
                     "detail": "Rate limit exceeded",
                     "retry_after": retry_after,
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Rate limit exceeded",
+                        "context": {"retry_after": retry_after},
+                    },
                 },
                 headers={"Retry-After": str(retry_after)},
             )

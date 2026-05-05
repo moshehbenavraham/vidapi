@@ -11,6 +11,13 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from app.api.deps import ArqPoolDep, DBSessionDep, RenderServiceDep, SettingsDep
 from app.db import render_crud
 from app.models.composition import Composition
+from app.models.errors import (
+    CONFLICT_ERROR,
+    NOT_FOUND_ERROR,
+    QUEUE_UNAVAILABLE_ERROR,
+    RATE_LIMIT_ERROR,
+    VALIDATION_ERROR,
+)
 from app.models.render import (
     CreateRenderResponse,
     RenderListItem,
@@ -32,6 +39,11 @@ router = APIRouter(tags=["renders"])
     "/renders",
     response_model=CreateRenderResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        422: VALIDATION_ERROR,
+        429: RATE_LIMIT_ERROR,
+        503: QUEUE_UNAVAILABLE_ERROR,
+    },
 )
 async def create_render(
     composition: Composition,
@@ -124,6 +136,7 @@ async def _create_render_sync(
 @router.get(
     "/renders",
     response_model=RenderListResponse,
+    responses={422: VALIDATION_ERROR},
 )
 async def list_renders(
     session: DBSessionDep,
@@ -179,6 +192,11 @@ async def list_renders(
 @router.delete(
     "/renders/{render_id}",
     status_code=status.HTTP_200_OK,
+    responses={
+        404: NOT_FOUND_ERROR,
+        409: CONFLICT_ERROR,
+        422: VALIDATION_ERROR,
+    },
 )
 async def cancel_render(
     render_id: str,
@@ -233,6 +251,10 @@ async def cancel_render(
 @router.get(
     "/renders/{render_id}",
     response_model=RenderResponse,
+    responses={
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
 )
 async def get_render(
     render_id: str,
@@ -279,7 +301,13 @@ async def get_render(
     )
 
 
-@router.get("/renders/{render_id}/download")
+@router.get(
+    "/renders/{render_id}/download",
+    responses={
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
+)
 async def download_render(
     render_id: str,
     session: DBSessionDep,

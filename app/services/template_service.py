@@ -50,7 +50,7 @@ class TemplateService:
         name: str,
         composition: Composition,
         description: str | None = None,
-        variable_schema: dict | None = None,
+        variable_schema: dict[str, Any] | None = None,
     ) -> tuple[Template, TemplateVersion]:
         composition_json = composition.model_dump_json()
         variable_schema_json = (
@@ -115,7 +115,7 @@ class TemplateService:
         name: str | None = None,
         description: str | None = None,
         composition: Composition | None = None,
-        variable_schema: dict | None = None,
+        variable_schema: dict[str, Any] | None = None,
     ) -> tuple[Template, TemplateVersion | None]:
         template = await template_crud.get_template_by_id(session, template_id)
         if template is None:
