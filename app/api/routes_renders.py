@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urlsplit
+
 import structlog
 from arq.connections import ArqRedis
 from fastapi import APIRouter, HTTPException, status
@@ -22,6 +26,7 @@ from app.api.errors import (
 )
 from app.core.config import Settings
 from app.db import render_crud
+from app.db.models import Render as RenderRecord
 from app.models.composition import Composition
 from app.models.errors import (
     AUTH_ERROR_RESPONSES,
@@ -53,12 +58,21 @@ from app.services.queue_admission import (
     QueueSaturatedError,
     admit_render_queue,
 )
-from app.storage.base import ArtifactType, artifact_media_type
+from app.storage.base import ArtifactType, artifact_filename, artifact_media_type
 from app.workers.render_worker import enqueue_render
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["renders"])
+
+
+@dataclass(frozen=True)
+class _RenderArtifactDownload:
+    artifact_uri: str
+    artifact_type: ArtifactType
+    filename: str
+    disposition: str
+    media_type: str | None = None
 
 
 @router.post(
@@ -391,6 +405,7 @@ async def get_render(
         output=output,
         captions=captions,
         poster_metadata=poster_metadata,
+        duration=render.output_duration_seconds,
         template_id=render.template_id,
         template_version_id=render.template_version_id,
         created_at=render.created_at,
@@ -446,6 +461,56 @@ async def download_render(
         filename=render.output_filename or f"{render_id}.mp4",
         disposition="attachment",
         media_type=render.output_media_type,
+    )
+
+
+@router.head(
+    "/renders/{render_id}/download",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
+)
+async def head_download_render(
+    render_id: str,
+    session: DBSessionDep,
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+) -> Response:
+    """Return rendered output file headers without streaming the body."""
+    render = await render_crud.get_render_by_id(session, render_id)
+    if render is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Render {render_id} not found",
+        )
+
+    render_status = RenderStatus(render.status)
+    if render_status != RenderStatus.SUCCEEDED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Render {render_id} is not complete (status: {render_status.value})"
+            ),
+        )
+
+    if not render.output_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No output file for render {render_id}",
+        )
+
+    return await _artifact_response(
+        render_id=render_id,
+        artifact_uri=render.output_path,
+        artifact_type=ArtifactType.OUTPUT,
+        storage=storage,
+        url_resolver=url_resolver,
+        filename=render.output_filename or f"{render_id}.mp4",
+        disposition="attachment",
+        media_type=render.output_media_type,
+        stream_body=False,
     )
 
 
@@ -560,7 +625,8 @@ async def download_render_artifact(
             detail=f"Render {render_id} not found",
         )
 
-    if artifact_name != ArtifactType.MANIFEST.value or not render.output_manifest_path:
+    artifact = _resolve_render_artifact(render, artifact_name)
+    if artifact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Artifact {artifact_name} not found for render {render_id}",
@@ -568,14 +634,151 @@ async def download_render_artifact(
 
     return await _artifact_response(
         render_id=render_id,
-        artifact_uri=render.output_manifest_path,
-        artifact_type=ArtifactType.MANIFEST,
+        artifact_uri=artifact.artifact_uri,
+        artifact_type=artifact.artifact_type,
         storage=storage,
         url_resolver=url_resolver,
+        filename=artifact.filename,
+        disposition=artifact.disposition,
+        media_type=artifact.media_type,
+    )
+
+
+def _resolve_render_artifact(
+    render: RenderRecord,
+    artifact_name: str,
+) -> _RenderArtifactDownload | None:
+    """Resolve supported deterministic artifact names from persisted render paths."""
+    artifacts: dict[str, _RenderArtifactDownload] = {}
+
+    def add_artifact(
+        *,
+        artifact_type: ArtifactType,
+        artifact_uri: str | None,
+        filename: str,
+        disposition: str,
+        media_type: str | None = None,
+        aliases: tuple[str, ...] = (),
+    ) -> None:
+        if not artifact_uri:
+            return
+        descriptor = _RenderArtifactDownload(
+            artifact_uri=artifact_uri,
+            artifact_type=artifact_type,
+            filename=filename,
+            disposition=disposition,
+            media_type=media_type,
+        )
+        for alias in aliases:
+            if alias:
+                artifacts.setdefault(alias, descriptor)
+
+    render_id = str(render.id)
+    output_path = render.output_path
+    output_filename = render.output_filename or f"{render_id}.mp4"
+    output_storage_filename = _artifact_filename_from_uri(output_path)
+    add_artifact(
+        artifact_type=ArtifactType.OUTPUT,
+        artifact_uri=output_path,
+        filename=output_filename,
+        disposition="attachment",
+        media_type=render.output_media_type,
+        aliases=(
+            ArtifactType.OUTPUT.value,
+            output_storage_filename,
+            output_filename,
+        ),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.INPUT,
+        artifact_uri=render.input_path,
+        filename=ArtifactType.INPUT.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.INPUT),
+        aliases=("input", ArtifactType.INPUT.value),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.EXPANDED,
+        artifact_uri=render.expanded_path,
+        filename=ArtifactType.EXPANDED.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.EXPANDED),
+        aliases=("expanded", ArtifactType.EXPANDED.value),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.COMPILED,
+        artifact_uri=render.compiled_path,
+        filename=ArtifactType.COMPILED.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.COMPILED),
+        aliases=("compiled", ArtifactType.COMPILED.value),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.MANIFEST,
+        artifact_uri=render.output_manifest_path,
         filename=ArtifactType.MANIFEST.value,
         disposition="inline",
         media_type=artifact_media_type(ArtifactType.MANIFEST),
+        aliases=("manifest", ArtifactType.MANIFEST.value),
     )
+
+    poster_path = render.poster_path
+    poster_filename = render.poster_filename or f"{render_id}.jpg"
+    add_artifact(
+        artifact_type=ArtifactType.POSTER,
+        artifact_uri=poster_path,
+        filename=poster_filename,
+        disposition="inline",
+        media_type=render.poster_media_type,
+        aliases=(
+            "poster",
+            ArtifactType.POSTER.value,
+            _artifact_filename_from_uri(poster_path),
+            poster_filename,
+        ),
+    )
+
+    caption_path = render.caption_sidecar_path
+    caption_filename = render.caption_sidecar_filename or f"{render_id}-captions.srt"
+    add_artifact(
+        artifact_type=ArtifactType.CAPTION_SIDECAR,
+        artifact_uri=caption_path,
+        filename=caption_filename,
+        disposition="attachment",
+        media_type=render.caption_sidecar_media_type,
+        aliases=(
+            ArtifactType.CAPTION_SIDECAR.value,
+            _artifact_filename_from_uri(caption_path),
+            caption_filename,
+        ),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.REPLAY,
+        artifact_uri=render.replay_path,
+        filename=ArtifactType.REPLAY.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.REPLAY),
+        aliases=("replay", ArtifactType.REPLAY.value),
+    )
+    add_artifact(
+        artifact_type=ArtifactType.LOG,
+        artifact_uri=render.log_path,
+        filename=ArtifactType.LOG.value,
+        disposition="inline",
+        media_type=artifact_media_type(ArtifactType.LOG),
+        aliases=("logs", ArtifactType.LOG.value),
+    )
+
+    return artifacts.get(artifact_name)
+
+
+def _artifact_filename_from_uri(artifact_uri: str | None) -> str:
+    if not artifact_uri:
+        return ""
+    parsed = urlsplit(artifact_uri)
+    path = parsed.path if parsed.scheme else artifact_uri
+    filename = PurePosixPath(unquote(path)).name
+    return filename or artifact_filename(ArtifactType.OUTPUT)
 
 
 async def _artifact_response(
@@ -588,6 +791,7 @@ async def _artifact_response(
     filename: str,
     disposition: str,
     media_type: str | None = None,
+    stream_body: bool = True,
 ) -> Response:
     redirect_url = await url_resolver.endpoint_redirect_url(
         render_id,
@@ -617,8 +821,16 @@ async def _artifact_response(
     headers = {
         "Content-Disposition": f'{disposition}; filename="{filename}"',
     }
+    resolved_media_type = media_type or artifact_media_type(artifact_type)
+    if not stream_body:
+        return Response(
+            status_code=status.HTTP_200_OK,
+            media_type=resolved_media_type,
+            headers=headers,
+        )
+
     return StreamingResponse(
         storage.iter_uri(artifact_uri),
-        media_type=media_type or artifact_media_type(artifact_type),
+        media_type=resolved_media_type,
         headers=headers,
     )

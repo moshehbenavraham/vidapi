@@ -313,6 +313,7 @@ class TestGetRender:
                 format=OutputFormat.WEBM,
                 media_type="video/webm",
                 filename=f"{render_id}.webm",
+                duration_seconds=1.25,
             ),
             output_path=output_uri,
         )
@@ -325,6 +326,7 @@ class TestGetRender:
         assert output["format"] == "webm"
         assert output["media_type"] == "video/webm"
         assert output["filename"] == f"{render_id}.webm"
+        assert response.json()["duration"] == 1.25
 
     @pytest.mark.asyncio
     async def test_succeeded_render_has_caption_and_poster_metadata(
@@ -500,6 +502,39 @@ class TestDownloadRender:
         assert f'filename="{render_id}.webm"' in response.headers["content-disposition"]
 
     @pytest.mark.asyncio
+    async def test_head_download_returns_output_headers_without_body(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"video-bytes",
+        )
+        await render_crud.update_render_output_metadata(
+            db_session,
+            render_id,
+            metadata=StoredOutputMetadata(
+                format=OutputFormat.MP4,
+                media_type="video/mp4",
+                filename=f"{render_id}.mp4",
+            ),
+            output_path=output_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        response = await client.head(f"/v1/renders/{render_id}/download")
+
+        assert response.status_code == 200
+        assert response.content == b""
+        assert response.headers["content-type"].startswith("video/mp4")
+        assert f'filename="{render_id}.mp4"' in response.headers["content-disposition"]
+
+    @pytest.mark.asyncio
     async def test_manifest_artifact_endpoint_streams_metadata(
         self,
         client: AsyncClient,
@@ -538,6 +573,102 @@ class TestDownloadRender:
         assert response.status_code == 200
         assert response.content == b'{"frame_count": 2}'
         assert response.headers["content-type"].startswith("application/json")
+
+    @pytest.mark.asyncio
+    async def test_generic_artifact_endpoint_streams_persisted_artifacts(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        input_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.INPUT,
+            b'{"input": true}',
+        )
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"video-bytes",
+        )
+        poster_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.POSTER,
+            b"poster-bytes",
+        )
+        replay_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.REPLAY,
+            b'{"replay": true}',
+        )
+        log_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.LOG,
+            b"log-bytes",
+        )
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            input_path=input_uri,
+            replay_path=replay_uri,
+            log_path=log_uri,
+        )
+        await render_crud.update_render_output_metadata(
+            db_session,
+            render_id,
+            metadata=StoredOutputMetadata(
+                format=OutputFormat.MP4,
+                media_type="video/mp4",
+                filename=f"{render_id}.mp4",
+            ),
+            output_path=output_uri,
+        )
+        await render_crud.update_render_poster_metadata(
+            db_session,
+            render_id,
+            metadata=StoredPosterMetadata(
+                mode=PosterMode.DEFAULT,
+                media_type="image/jpeg",
+                filename=f"{render_id}.jpg",
+            ),
+            poster_path=poster_uri,
+        )
+
+        expected = {
+            "input": b'{"input": true}',
+            "input.json": b'{"input": true}',
+            "output": b"video-bytes",
+            "output.mp4": b"video-bytes",
+            f"{render_id}.mp4": b"video-bytes",
+            "poster": b"poster-bytes",
+            "poster.jpg": b"poster-bytes",
+            f"{render_id}.jpg": b"poster-bytes",
+            "replay": b'{"replay": true}',
+            "replay.json": b'{"replay": true}',
+            "logs": b"log-bytes",
+            "logs.txt": b"log-bytes",
+        }
+
+        for artifact_name, content in expected.items():
+            response = await client.get(
+                f"/v1/renders/{render_id}/artifacts/{artifact_name}"
+            )
+            assert response.status_code == 200, artifact_name
+            assert response.content == content
+
+    @pytest.mark.asyncio
+    async def test_generic_artifact_endpoint_returns_404_for_unknown_name(
+        self,
+        client: AsyncClient,
+        db_session,
+    ):
+        render = await render_crud.create_render(db_session)
+
+        response = await client.get(f"/v1/renders/{render.id}/artifacts/unknown.txt")
+
+        assert response.status_code == 404
 
     @pytest.mark.asyncio
     async def test_poster_endpoint_streams_storage_artifact(

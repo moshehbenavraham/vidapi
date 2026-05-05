@@ -10,8 +10,9 @@ import structlog
 from fastapi import FastAPI, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.openapi.utils import get_openapi
 
-from app.api.auth import require_api_key
+from app.api.auth import API_KEY_SECURITY_SCHEME_NAME, require_api_key
 from app.api.errors import register_error_handlers
 from app.api.routes_health import router as health_router
 from app.api.routes_ops import router as ops_router
@@ -32,6 +33,17 @@ from app.db.session import (
 )
 
 logger = structlog.get_logger(__name__)
+
+OPENAPI_DESCRIPTION = (
+    "VidAPI accepts JSON timeline compositions and renders deterministic video "
+    "artifacts. API key auth is enabled when API_KEY_AUTH_ENABLED=true; local "
+    "development starts with API key auth disabled."
+)
+
+
+class VidAPIFastAPI(FastAPI):
+    def openapi(self) -> dict[str, Any]:
+        return _custom_openapi(self)
 
 
 async def _prepare_database() -> None:
@@ -81,9 +93,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
 
-    app = FastAPI(
+    app = VidAPIFastAPI(
         title=settings.app_name,
         version=settings.app_version,
+        description=OPENAPI_DESCRIPTION,
         debug=settings.debug,
         lifespan=lifespan,
     )
@@ -165,6 +178,70 @@ def create_app() -> FastAPI:
     )
 
     return app
+
+
+def _custom_openapi(app: FastAPI) -> dict[str, Any]:
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    settings = _openapi_settings(app)
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    if not settings.api_key_auth_enabled:
+        _remove_api_key_security(schema)
+        schema["info"]["description"] = (
+            f"{OPENAPI_DESCRIPTION}\n\n"
+            "Current instance: API key auth is disabled, so protected endpoints "
+            "can be called without X-API-Key."
+        )
+    else:
+        schema["info"]["description"] = (
+            f"{OPENAPI_DESCRIPTION}\n\n"
+            "Current instance: API key auth is enabled. Send X-API-Key on "
+            "protected endpoints."
+        )
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+def _openapi_settings(app: FastAPI) -> Any:
+    override = app.dependency_overrides.get(get_settings)
+    if override is not None:
+        return override()
+    return get_settings()
+
+
+def _remove_api_key_security(schema: dict[str, Any]) -> None:
+    components = schema.get("components", {})
+    security_schemes = components.get("securitySchemes", {})
+    security_schemes.pop(API_KEY_SECURITY_SCHEME_NAME, None)
+    if not security_schemes:
+        components.pop("securitySchemes", None)
+    if not components:
+        schema.pop("components", None)
+
+    for path_item in schema.get("paths", {}).values():
+        if not isinstance(path_item, dict):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            security = operation.get("security")
+            if not isinstance(security, list):
+                continue
+            filtered_security = [
+                requirement
+                for requirement in security
+                if API_KEY_SECURITY_SCHEME_NAME not in requirement
+            ]
+            if filtered_security:
+                operation["security"] = filtered_security
+            else:
+                operation.pop("security", None)
 
 
 app = create_app()

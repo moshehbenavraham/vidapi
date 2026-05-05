@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "VidAPI"
-    app_version: str = "0.1.2"
+    app_version: str = "0.1.3"
     debug: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     environment: Literal["development", "test", "production"] = "development"

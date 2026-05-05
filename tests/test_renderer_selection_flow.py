@@ -188,6 +188,9 @@ async def test_render_service_resolves_explicit_editly(
     render = await render_service.execute_render(composition, db_session)
 
     assert render.renderer == "editly"
+    assert render.status == "succeeded"
+    assert render.stage == "complete"
+    assert render.progress == 100
     assert isinstance(mock_renderer.compile, AsyncMock)
     mock_renderer.compile.assert_awaited_once()
 
@@ -256,6 +259,9 @@ async def test_direct_render_with_explicit_native_persists_native(
     render = await render_crud.get_render_by_id(db_session, response.json()["id"])
     assert render is not None
     assert render.renderer == "ffmpeg-native"
+    assert render.status == "succeeded"
+    assert render.stage == "complete"
+    assert render.progress == 100
     native_renderer.compile.assert_awaited_once()
     native_renderer.render.assert_awaited_once()
 

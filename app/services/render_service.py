@@ -127,18 +127,46 @@ class RenderService:
         try:
             workspace = await self._storage.create_workspace(render_id)
 
+            await render_crud.update_render_status(
+                session,
+                render_id,
+                RenderStatus.FETCHING,
+                stage="validating",
+                progress=5,
+            )
             expanded_composition = await self.stage_validate_and_expand(
                 composition, render_id, workspace, session
             )
 
+            await render_crud.update_render_status(
+                session,
+                render_id,
+                RenderStatus.COMPILING,
+                stage="resolving_assets",
+                progress=20,
+            )
             compiled = await self.stage_resolve_and_compile(
                 expanded_composition, render_id, workspace, session
             )
 
+            await render_crud.update_render_status(
+                session,
+                render_id,
+                RenderStatus.RENDERING,
+                stage="rendering",
+                progress=30,
+            )
             await self.stage_render_and_store(
                 expanded_composition, compiled, render_id, workspace, session
             )
 
+            await render_crud.update_render_status(
+                session,
+                render_id,
+                RenderStatus.UPLOADING,
+                stage="finalizing",
+                progress=90,
+            )
             updated = await render_crud.update_render_status(
                 session,
                 render_id,
@@ -406,6 +434,7 @@ class RenderService:
                 format=composition.output.format,
                 media_type=finished.media_type,
                 filename=finished.filename,
+                duration_seconds=artifact_for_finishing.duration_seconds,
                 frame_count=finished.frame_count,
                 manifest_path=manifest_uri,
             ),

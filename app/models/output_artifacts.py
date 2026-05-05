@@ -15,6 +15,7 @@ class StoredOutputMetadata(BaseModel):
     format: OutputFormat
     media_type: str = Field(min_length=1, max_length=100)
     filename: str = Field(min_length=1, max_length=255)
+    duration_seconds: float | None = Field(default=None, ge=0.0)
     frame_count: int | None = Field(default=None, ge=0)
     manifest_path: str | None = Field(default=None, max_length=2048)
 

@@ -58,24 +58,26 @@ docker compose down -v        # Stop and remove volumes
 
 ```bash
 # Prerequisites: Python 3.11+, Node.js 22+, FFmpeg 6+, Redis
-uv venv .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-uvicorn app.main:app --reload
+# Starts Redis, FastAPI, and the ARQ worker on http://127.0.0.1:8005
+scripts/dev.sh
 
 # Verify
-curl http://localhost:8000/v1/health
+curl http://127.0.0.1:8005/v1/health
 ```
 
-Local development starts with API key auth disabled. To exercise protected API
-behavior locally, generate a SHA-256 hash for a raw key and enable auth:
+Local development starts with API key auth disabled. The generated OpenAPI
+schema reflects the active auth mode: local docs omit API-key requirements when
+`API_KEY_AUTH_ENABLED=false`, and show `X-API-Key` requirements when auth is
+enabled. To exercise protected API behavior locally, generate a SHA-256 hash for
+a raw key and enable auth:
 
 ```bash
 export VIDAPI_API_KEY="replace-with-a-local-secret"
 export API_KEY_AUTH_ENABLED=true
 export API_KEY_HASHES="$(python -c 'import hashlib, os; print(hashlib.sha256(os.environ["VIDAPI_API_KEY"].encode()).hexdigest())')"
-uvicorn app.main:app --reload
+scripts/dev.sh
 
-curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
+curl -H "X-API-Key: $VIDAPI_API_KEY" http://127.0.0.1:8005/v1/renders
 ```
 
 ## Prerequisites
@@ -119,9 +121,10 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 | `GET` | `/v1/renders/{id}` | Get render status, progress, and output URLs |
 | `DELETE` | `/v1/renders/{id}` | Cancel a queued or running render |
 | `GET` | `/v1/renders/{id}/download` | Download rendered output |
+| `HEAD` | `/v1/renders/{id}/download` | Inspect output headers without downloading bytes |
 | `GET` | `/v1/renders/{id}/poster` | Download or redirect to a render poster |
 | `GET` | `/v1/renders/{id}/captions` | Download or redirect to a caption sidecar |
-| `GET` | `/v1/renders/{id}/artifacts/manifest.json` | Download PNG sequence manifest metadata |
+| `GET` | `/v1/renders/{id}/artifacts/{name}` | Download deterministic artifacts such as `input.json`, `expanded.json`, `compiled.editly.json`, `replay.json`, `logs.txt`, `poster.jpg`, `output`, or `manifest.json` |
 
 ### Operational Endpoints
 
@@ -149,7 +152,16 @@ API key auth is enabled.
 | `DELETE` | `/v1/templates/{id}` | Soft-delete or archive a template |
 | `POST` | `/v1/templates/{id}/renders` | Render a template with merge variables |
 
-Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
+Interactive API docs are available at `/docs` (Swagger) and `/redoc`. FastAPI's
+default docs UI loads Swagger/ReDoc assets from public CDNs, so use
+`/openapi.json` directly when working offline or behind a firewall that blocks
+those assets.
+
+For zero-state local retesting, stop the local stack and run:
+
+```bash
+scripts/dev.sh clean-state
+```
 
 ### Renderer Selection
 
@@ -320,19 +332,6 @@ and a `Retry-After` header.
 - **httpx** - Async asset downloads with SSRF protection
 - **structlog** - Structured JSON logging
 - **S3-compatible storage** - Production artifact backend with MinIO validation
-
-## Project Status
-
-Phases 00, 01, 02, 03, and 04 are complete. See
-[PRD](.spec_system/PRD/PRD.md) for the archived roadmap and session history.
-
-| Phase | Name | Status |
-|-------|------|--------|
-| 00 | Foundation | Complete (5/5 sessions) |
-| 01 | Async Jobs and Multi-track | Complete (5/5 sessions) |
-| 02 | Templates and Polish | Complete (5/5 sessions) |
-| 03 | Production Hardening | Complete (5/5 sessions) |
-| 04 | Advanced Rendering | Complete (6/6 sessions) |
 
 ## License
 

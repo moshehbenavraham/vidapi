@@ -623,6 +623,19 @@ def serialize_spec(spec: dict[str, Any]) -> str:
     return json.dumps(spec, sort_keys=True, indent=2, ensure_ascii=True)
 
 
+def spec_duration_seconds(spec_json: str) -> float:
+    """Return media duration from an Editly JSON spec."""
+    spec = json.loads(spec_json)
+    clips = spec.get("clips", [])
+    duration = 0.0
+    if isinstance(clips, list):
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            duration += float(clip.get("duration") or 0.0)
+    return round(duration, 3)
+
+
 # ---------------------------------------------------------------------------
 # Replay Metadata
 # ---------------------------------------------------------------------------
@@ -984,7 +997,7 @@ class EditlyRenderer:
             output_path=output_path,
             poster_path=None,
             log_path=log_path,
-            duration_seconds=round(elapsed, 3),
+            duration_seconds=spec_duration_seconds(compiled.spec_json),
             exit_code=exit_code or 0,
         )
 

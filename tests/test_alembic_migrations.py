@@ -39,6 +39,9 @@ EXPECTED_RENDER_METADATA_COLUMNS = {
 EXPECTED_RENDER_SELECTION_COLUMNS = {
     "renderer",
 }
+EXPECTED_RENDER_DURATION_COLUMNS = {
+    "output_duration_seconds",
+}
 
 
 def _alembic_script() -> ScriptDirectory:
@@ -98,10 +101,16 @@ def test_sqlmodel_render_model_already_persists_renderer_selection() -> None:
     assert EXPECTED_RENDER_SELECTION_COLUMNS.issubset(render_columns)
 
 
+def test_sqlmodel_render_model_persists_output_duration() -> None:
+    render_columns = set(SQLModel.metadata.tables["renders"].columns.keys())
+
+    assert EXPECTED_RENDER_DURATION_COLUMNS.issubset(render_columns)
+
+
 def test_alembic_has_single_current_head() -> None:
     heads = _alembic_script().get_heads()
 
-    assert heads == ["007"]
+    assert heads == ["008"]
 
 
 def test_alembic_revision_chain_includes_caption_and_poster_revision() -> None:
@@ -110,7 +119,7 @@ def test_alembic_revision_chain_includes_caption_and_poster_revision() -> None:
         for revision in _alembic_script().walk_revisions(base="base", head="heads")
     }
 
-    assert {"001", "002", "003", "004", "005", "006", "007"}.issubset(revisions)
+    assert {"001", "002", "003", "004", "005", "006", "007", "008"}.issubset(revisions)
 
 
 def test_alembic_upgrades_and_downgrades_sqlite_database(
@@ -125,11 +134,14 @@ def test_alembic_upgrades_and_downgrades_sqlite_database(
         command.upgrade(_alembic_config(), "head")
 
         assert EXPECTED_TABLES.issubset(_sqlite_tables(database_path))
-        assert _sqlite_alembic_version(database_path) == "007"
+        assert _sqlite_alembic_version(database_path) == "008"
         assert EXPECTED_RENDER_METADATA_COLUMNS.issubset(
             _sqlite_columns(database_path, "renders")
         )
         assert EXPECTED_RENDER_SELECTION_COLUMNS.issubset(
+            _sqlite_columns(database_path, "renders")
+        )
+        assert EXPECTED_RENDER_DURATION_COLUMNS.issubset(
             _sqlite_columns(database_path, "renders")
         )
 

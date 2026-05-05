@@ -77,6 +77,22 @@ async def test_disabled_auth_client_remains_public(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_openapi_omits_api_key_scheme_when_auth_disabled(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/openapi.json")
+    assert response.status_code == 200
+    schema = response.json()
+
+    assert "APIKeyAuth" not in schema.get("components", {}).get(
+        "securitySchemes",
+        {},
+    )
+    assert "security" not in schema["paths"]["/v1/renders"]["post"]
+    assert "API key auth is disabled" in schema["info"]["description"]
+
+
+@pytest.mark.asyncio
 async def test_health_routes_remain_public_when_auth_enabled(
     auth_client: AsyncClient,
 ) -> None:

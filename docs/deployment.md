@@ -263,7 +263,7 @@ URL modes:
 
 | Mode | Behavior |
 |------|----------|
-| `proxy` | API streams local or S3 artifacts through `/download` and `/poster` |
+| `proxy` | API streams local or S3 artifacts through `/download`, `/poster`, `/captions`, and `/artifacts/{name}` |
 | `signed` | S3 status/webhook URLs and direct endpoints use presigned redirects |
 | `public` | S3 status/webhook URLs and direct endpoints use `S3_PUBLIC_BASE_URL` |
 

@@ -100,6 +100,7 @@ def plan_output_format(render_id: str, output: Output) -> OutputFormatPlan:
 def stored_metadata_for_plan(
     plan: OutputFormatPlan,
     *,
+    duration_seconds: float | None = None,
     frame_count: int | None = None,
     manifest_path: str | None = None,
 ) -> StoredOutputMetadata:
@@ -108,6 +109,7 @@ def stored_metadata_for_plan(
         format=plan.output_format,
         media_type=plan.media_type,
         filename=plan.filename,
+        duration_seconds=duration_seconds,
         frame_count=frame_count,
         manifest_path=manifest_path,
     )

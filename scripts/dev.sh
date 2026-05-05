@@ -21,12 +21,14 @@ log() {
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev.sh [async|sync|test] [pytest args...]
+Usage: scripts/dev.sh [async|sync|test|clean-state] [pytest args...]
 
 Modes:
   async  Start Redis, FastAPI, and the ARQ worker. This is the default.
   sync   Start FastAPI only with RENDER_MODE=sync. No Redis required.
   test   Run pytest through the repo-local virtualenv.
+  clean-state
+         Remove default local SQLite, durable artifacts, and render workspaces.
 
 Useful environment overrides:
   RENDER_MODE=sync|async       Default mode when no CLI mode is supplied.
@@ -331,10 +333,40 @@ run_test_mode() {
   exec "$VENV_DIR/bin/pytest" "$@"
 }
 
+clean_local_state() {
+  setup_local_env
+
+  if [ "$DATABASE_URL" = "sqlite+aiosqlite:///./data/vidapi.db" ] \
+    || [ "$DATABASE_URL" = "sqlite:///./data/vidapi.db" ]; then
+    log "Removing default local SQLite database"
+    rm -f data/vidapi.db data/vidapi.db-shm data/vidapi.db-wal
+  else
+    log "Skipping database cleanup for non-default DATABASE_URL=${DATABASE_URL}"
+  fi
+
+  if [ "$STORAGE_ROOT" = "./data" ] || [ "$STORAGE_ROOT" = "data" ]; then
+    log "Removing default durable local artifacts"
+    rm -rf data/artifacts
+  else
+    log "Skipping artifact cleanup for non-default STORAGE_ROOT=${STORAGE_ROOT}"
+  fi
+
+  if [ "$RENDER_WORKSPACE_ROOT" = "data/renders" ] \
+    || [ "$RENDER_WORKSPACE_ROOT" = "./data/renders" ]; then
+    log "Removing default render workspaces"
+    rm -rf data/renders
+  else
+    log "Skipping workspace cleanup for non-default RENDER_WORKSPACE_ROOT=${RENDER_WORKSPACE_ROOT}"
+  fi
+
+  mkdir -p "$STORAGE_ROOT" "$RENDER_WORKSPACE_ROOT"
+  log "Local development state reset"
+}
+
 CLI_MODE=""
 if [ "$#" -gt 0 ]; then
   case "$1" in
-    async|sync|test)
+    async|sync|test|clean-state)
       CLI_MODE="$1"
       shift
       ;;
@@ -351,7 +383,7 @@ fi
 
 MODE="${CLI_MODE:-${RENDER_MODE:-async}}"
 case "$MODE" in
-  async|sync|test) ;;
+  async|sync|test|clean-state) ;;
   *)
     echo "Unsupported mode: ${MODE}" >&2
     usage >&2
@@ -361,6 +393,11 @@ esac
 
 if [ "$MODE" = "test" ]; then
   run_test_mode "$@"
+fi
+
+if [ "$MODE" = "clean-state" ]; then
+  clean_local_state
+  exit 0
 fi
 
 trap cleanup EXIT INT TERM

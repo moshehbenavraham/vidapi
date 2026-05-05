@@ -11,15 +11,19 @@
 
 | Service | Port | URL |
 |---------|------|-----|
-| FastAPI API | 8000 | http://localhost:8000 |
-| OpenAPI docs | 8000 | http://localhost:8000/docs |
-| ReDoc | 8000 | http://localhost:8000/redoc |
+| FastAPI API | 8005 with `scripts/dev.sh`, 8000 with raw uvicorn | http://127.0.0.1:8005 |
+| OpenAPI docs | same as API | http://127.0.0.1:8005/docs |
+| ReDoc | same as API | http://127.0.0.1:8005/redoc |
 | Redis | 6379 | redis://localhost:6379 |
 
 ## Dev Scripts
 
 | Command | Purpose |
 |---------|---------|
+| `scripts/dev.sh` | Start Redis, FastAPI, and the ARQ worker for local async development |
+| `scripts/dev.sh sync` | Start FastAPI only with `RENDER_MODE=sync` |
+| `scripts/dev.sh test [pytest args...]` | Run pytest through the repo-local virtualenv |
+| `scripts/dev.sh clean-state` | Remove default local SQLite state, durable artifacts, and render workspaces |
 | `uvicorn app.main:app --reload` | Start dev server with auto-reload |
 | `arq app.workers.arq_settings.WorkerSettings` | Start ARQ render worker |
 | `ruff check .` | Run linter |
@@ -33,6 +37,10 @@
 | `alembic downgrade base` | Reset database |
 | `docker compose up --build` | Start full async stack (API + worker + Redis) |
 | `bash scripts/smoke-test.sh` | Run end-to-end Docker smoke test |
+
+`scripts/dev.sh clean-state` only removes the default local paths
+(`data/vidapi.db`, `data/artifacts`, and `data/renders`). It skips database,
+artifact, or workspace cleanup when those paths are overridden.
 
 ## Database
 
@@ -102,6 +110,24 @@ S3_FORCE_PATH_STYLE=true
 
 Tests use mocks for S3 behavior by default; MinIO is only for manual smoke
 checks.
+
+## Local API Docs And Auth
+
+Local development defaults to `API_KEY_AUTH_ENABLED=false`. The OpenAPI schema
+matches the active setting: when auth is disabled, protected routes are shown
+without `APIKeyAuth`; when auth is enabled, protected routes require
+`X-API-Key`.
+
+The interactive Swagger and ReDoc pages use FastAPI's default public CDN assets.
+Use `/openapi.json` directly for offline testing or in networks that block
+`cdn.jsdelivr.net` or FastAPI's favicon host.
+
+## Renderer Tools
+
+Default non-HTML renders select Editly. If `editly` is not installed locally,
+`scripts/dev.sh` prints a startup warning; install Editly for full renderer
+coverage or request `renderer: "ffmpeg-native"` for simple local smoke renders.
+HTML-backed renders require HyperFrames.
 
 ## Testing
 

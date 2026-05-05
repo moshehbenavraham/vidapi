@@ -386,6 +386,7 @@ async def update_render_output_metadata(
     render.output_format = metadata.format.value
     render.output_media_type = metadata.media_type
     render.output_filename = metadata.filename
+    render.output_duration_seconds = metadata.duration_seconds
     render.output_frame_count = metadata.frame_count
     render.output_manifest_path = metadata.manifest_path
     render.updated_at = datetime.now(tz=UTC)
@@ -407,6 +408,7 @@ async def clear_render_output_metadata(
     render.output_format = None
     render.output_media_type = None
     render.output_filename = None
+    render.output_duration_seconds = None
     render.output_frame_count = None
     render.output_manifest_path = None
     render.updated_at = datetime.now(tz=UTC)

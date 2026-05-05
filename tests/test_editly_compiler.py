@@ -36,11 +36,25 @@ from app.renderers.editly import (
     map_video_layer,
     needs_audio_mixing,
     serialize_spec,
+    spec_duration_seconds,
 )
 
 # ---------------------------------------------------------------------------
 # Layer Mapper Unit Tests
 # ---------------------------------------------------------------------------
+
+
+def test_spec_duration_seconds_sums_editly_clip_durations() -> None:
+    spec_json = serialize_spec(
+        {
+            "clips": [
+                {"duration": 1.25, "layers": []},
+                {"duration": 2.5, "layers": []},
+            ]
+        }
+    )
+
+    assert spec_duration_seconds(spec_json) == 3.75
 
 
 class TestFitModeTranslation:

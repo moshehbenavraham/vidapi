@@ -53,6 +53,7 @@ class Render(SQLModel, table=True):
     output_format: str | None = Field(default=None, max_length=32)
     output_media_type: str | None = Field(default=None, max_length=100)
     output_filename: str | None = Field(default=None, max_length=255)
+    output_duration_seconds: float | None = Field(default=None)
     output_frame_count: int | None = Field(default=None)
     output_manifest_path: str | None = Field(default=None, max_length=2048)
     poster_path: str | None = Field(default=None)
