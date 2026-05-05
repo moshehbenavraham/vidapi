@@ -172,7 +172,7 @@ Platform: GitHub Actions
 |--------|--------|----------|
 | Code Quality | configured | .github/workflows/quality.yml |
 | Build & Test | configured | .github/workflows/test.yml |
-| Security | not configured | - |
+| Security | configured | .github/workflows/security.yml |
 | Integration | not configured | - |
 | Operations | not configured | - |
 
