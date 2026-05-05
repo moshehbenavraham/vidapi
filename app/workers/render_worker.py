@@ -20,6 +20,7 @@ from app.renderers.capabilities import (
     RendererCapabilityError,
     validate_renderer_capabilities,
 )
+from app.renderers.timeline import compute_total_duration
 from app.services.ffmpeg_progress import compute_progress_percent, parse_time_from_line
 from app.services.limits import LimitExceededError, validate_composition_limits
 from app.services.render_service import RenderService, RenderServiceError
@@ -435,9 +436,6 @@ async def _execute_pipeline(
             progress=30,
         )
         log_collector.add("rendering", "Status -> RENDERING")
-
-        # Compute total duration for progress percentage
-        from app.renderers.editly import compute_total_duration
 
         total_duration = compute_total_duration(composition.timeline.tracks)
 

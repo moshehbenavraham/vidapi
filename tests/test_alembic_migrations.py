@@ -36,6 +36,9 @@ EXPECTED_RENDER_METADATA_COLUMNS = {
     "poster_media_type",
     "poster_filename",
 }
+EXPECTED_RENDER_SELECTION_COLUMNS = {
+    "renderer",
+}
 
 
 def _alembic_script() -> ScriptDirectory:
@@ -89,6 +92,12 @@ def test_sqlmodel_render_metadata_includes_caption_and_poster_columns() -> None:
     assert EXPECTED_RENDER_METADATA_COLUMNS.issubset(render_columns)
 
 
+def test_sqlmodel_render_model_already_persists_renderer_selection() -> None:
+    render_columns = set(SQLModel.metadata.tables["renders"].columns.keys())
+
+    assert EXPECTED_RENDER_SELECTION_COLUMNS.issubset(render_columns)
+
+
 def test_alembic_has_single_current_head() -> None:
     heads = _alembic_script().get_heads()
 
@@ -118,6 +127,9 @@ def test_alembic_upgrades_and_downgrades_sqlite_database(
         assert EXPECTED_TABLES.issubset(_sqlite_tables(database_path))
         assert _sqlite_alembic_version(database_path) == "007"
         assert EXPECTED_RENDER_METADATA_COLUMNS.issubset(
+            _sqlite_columns(database_path, "renders")
+        )
+        assert EXPECTED_RENDER_SELECTION_COLUMNS.issubset(
             _sqlite_columns(database_path, "renders")
         )
 

@@ -1,0 +1,40 @@
+{
+  "renderer": "ffmpeg-native",
+  "timeline": {
+    "background": "#101010",
+    "tracks": [
+      {
+        "clips": [
+          {
+            "asset": {
+              "type": "color",
+              "color": "#202020"
+            },
+            "length": 2.0
+          }
+        ]
+      },
+      {
+        "clips": [
+          {
+            "asset": {
+              "type": "image",
+              "src": "image://title"
+            },
+            "start": 0.25,
+            "length": 1.5,
+            "fit": "contain",
+            "position": "center",
+            "opacity": 0.8
+          }
+        ]
+      }
+    ]
+  },
+  "output": {
+    "format": "mp4",
+    "width": 640,
+    "height": 360,
+    "fps": 24
+  }
+}

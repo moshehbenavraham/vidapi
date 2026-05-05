@@ -61,7 +61,8 @@
     "phase04-session01-renderer-capability-registry",
     "phase04-session02-output-formats-and-presets",
     "phase04-session03-captions-and-poster-customization",
-    "phase04-session04-advanced-transitions-and-feature-validation"
+    "phase04-session04-advanced-transitions-and-feature-validation",
+    "phase04-session05-native-ffmpeg-renderer-subset"
   ],
   "next_session_history": [
     {
@@ -407,6 +408,16 @@
     {
       "date": "2026-05-05",
       "session": "phase04-session04-advanced-transitions-and-feature-validation",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session05-native-ffmpeg-renderer-subset",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session05-native-ffmpeg-renderer-subset",
       "status": "completed"
     }
   ]

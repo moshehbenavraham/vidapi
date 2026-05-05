@@ -33,6 +33,12 @@ from app.renderers.base import (
     RenderError,
 )
 from app.renderers.position import resolve_position
+from app.renderers.timeline import (
+    asset_resolver_key,
+)
+from app.renderers.timeline import (
+    compute_total_duration as compute_visual_total_duration,
+)
 from app.renderers.transitions import (
     TransitionValidationError,
     editly_transition_payload,
@@ -167,15 +173,7 @@ def generate_segments(
 
 def compute_total_duration(tracks: list[Track]) -> float:
     """Compute the total timeline duration from all clips."""
-    max_end = 0.0
-    for track in tracks:
-        for clip in track.clips:
-            if isinstance(clip.asset, AudioAsset):
-                continue
-            end = clip.start + clip.length
-            if end > max_end:
-                max_end = end
-    return max_end
+    return compute_visual_total_duration(tracks)
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +331,7 @@ def map_text_png_layer(
     """
     layer: dict[str, Any] = {
         "type": "image-overlay",
-        "path": "",
+        "path": asset_resolver_key(clip) or "",
     }
     _apply_position_to_overlay_layer(
         layer,

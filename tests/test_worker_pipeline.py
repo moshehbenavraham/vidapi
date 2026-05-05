@@ -241,6 +241,56 @@ class TestPipelineTransitions:
             assert render is not None
             assert render.status == RenderStatus.SUCCEEDED.value
 
+    @pytest.mark.asyncio
+    async def test_explicit_native_renderer_persists_selection_and_progress_plumbing(
+        self,
+        pipeline_db_engine,
+        pipeline_session_factory,
+        pipeline_workspace,
+        mock_service,
+    ):
+        """Worker keeps explicit native renderer selection and progress callbacks."""
+        payload = {
+            "renderer": "ffmpeg-native",
+            "timeline": {
+                "background": "#000000",
+                "tracks": [
+                    {
+                        "clips": [
+                            {
+                                "asset": {"type": "color", "color": "#000000"},
+                                "length": 1.0,
+                            }
+                        ]
+                    }
+                ],
+            },
+            "output": {"format": "mp4", "width": 320, "height": 180, "fps": 24},
+        }
+        render_id = await _create_render_with_input(
+            pipeline_session_factory,
+            pipeline_workspace,
+            payload,
+        )
+
+        ctx = {
+            "session_factory": pipeline_session_factory,
+            "render_service": mock_service,
+            "workspace_manager": pipeline_workspace,
+        }
+
+        await run_render(ctx, render_id)
+
+        async with pipeline_session_factory() as session:
+            render = await render_crud.get_render_by_id(session, render_id)
+            assert render is not None
+            assert render.status == RenderStatus.SUCCEEDED.value
+            assert render.renderer == "ffmpeg-native"
+
+        kwargs = mock_service.stage_render_and_store.await_args.kwargs
+        assert kwargs["progress_callback"] is not None
+        assert kwargs["cancel_check"] is not None
+
 
 # ---------------------------------------------------------------------------
 # Tests: Failure paths with error codes

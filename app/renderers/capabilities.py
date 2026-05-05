@@ -159,9 +159,9 @@ EDITLY_CAPABILITY = RendererCapability(
 
 FFMPEG_NATIVE_CAPABILITY = RendererCapability(
     name=FFMPEG_NATIVE_RENDERER,
-    available=False,
-    asset_types=frozenset(),
-    output_formats=frozenset(),
+    available=True,
+    asset_types=frozenset({"video", "image", "text", "audio", "color"}),
+    output_formats=supported_output_formats(),
     transitions=frozenset(),
 )
 

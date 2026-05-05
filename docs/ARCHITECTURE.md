@@ -43,6 +43,10 @@ Render Worker (ARQ consumer)
   |   |   |   |-- Position Resolver (named positions + offsets)
   |   |   |   |-- Transition Planner (schema values -> validated renderer boundaries)
   |   |   |   |-- FFmpeg (invoked by Editly)
+  |   |   |-- Native FFmpeg Renderer (bounded FFmpeg filter graph)
+  |   |   |   |-- Native Subset Validator
+  |   |   |   |-- Timeline Helper (duration + visual ordering)
+  |   |   |   |-- FFmpeg (direct subprocess)
   |   |   |
   |   |   |-- Audio Mixer (FFmpeg post-process for detached audio)
   |   |   |-- Caption Finisher (sidecars + FFmpeg burn-in)
@@ -107,11 +111,17 @@ Local Filesystem (render artifacts)
 - **Tech**: Segment compiler (pure functions), asyncio subprocess, streaming stderr with progress/cancel callbacks
 - **Location**: `app/renderers/editly.py`
 
+### Native FFmpeg Renderer
+- **Purpose**: Compiles a constrained simple timeline subset directly to FFmpeg command and filter graph artifacts
+- **Tech**: Native subset validator, deterministic plan objects, asyncio subprocess, streaming stderr with progress/cancel callbacks
+- **Location**: `app/renderers/native_ffmpeg.py`, `app/renderers/native_ffmpeg_subset.py`
+- **Current support**: explicit `ffmpeg-native` requests for color, image, video, text PNG, soundtrack, and detached audio timelines without transitions, captions, poster controls, transforms, or client-supplied filters
+
 ### Renderer Capability Registry
 - **Purpose**: Selects the effective renderer and validates renderer-feature compatibility before queue admission, worker compile, or sync-service compile
 - **Tech**: Immutable support declarations, stable capability exceptions, redacted error context
 - **Location**: `app/renderers/capabilities.py`
-- **Current support**: omitted, `auto`, and `editly` select Editly; `ffmpeg-native` and `hyperframes` are known but unavailable future adapters
+- **Current support**: omitted, `auto`, and `editly` select Editly; explicit `ffmpeg-native` selects the native FFmpeg subset; `hyperframes` is known but unavailable
 
 ### Segment Compiler
 - **Purpose**: Converts absolute-time timeline clips into sequential Editly clips with layers
@@ -201,10 +211,10 @@ Local Filesystem (render artifacts)
 10. Assets resolved: remote fetched via httpx, text rendered to PNG, all cached by SHA-256
 11. Template-backed renders expand merge variables before compile and persist `expanded.json`
 12. Render service revalidates renderer capabilities and transition semantics before compilation as a replay defense
-13. Segment compiler converts absolute-time timeline to sequential Editly clips
-14. Position resolver and transition planner normalize renderer-facing layout details
-15. Compiled Editly JSON + replay metadata written to workspace
-16. Editly invoked as Node subprocess with timeout; progress parsed from FFmpeg stderr
+13. Selected renderer compiles absolute-time timeline data into renderer-specific artifacts
+14. Editly uses the segment compiler, position resolver, and transition planner; native FFmpeg uses native subset validation, timeline ordering, and deterministic FFmpeg filters
+15. Compiled renderer JSON + replay metadata written to workspace
+16. Renderer subprocess invoked with timeout; progress parsed from FFmpeg stderr
 17. Detached audio clips mixed via FFmpeg post-processing when needed
 18. Caption finisher writes sidecars or burns captions into the MP4 intermediate when requested
 19. Output postprocessor keeps MP4 or converts the selected intermediate to WebM, GIF, or a PNG sequence zip and manifest

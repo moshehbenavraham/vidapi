@@ -152,17 +152,20 @@ Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
 
 ### Renderer Selection
 
-Render requests may omit `renderer`, set it to `auto`, or explicitly request
-`editly`; all three currently select the Editly renderer. Future renderer names
-such as `ffmpeg-native` and `hyperframes` are reserved but unavailable until
-their adapters are implemented.
+Render requests may omit `renderer`, set it to `auto`, explicitly request
+`editly`, or explicitly request `ffmpeg-native`. Omitted, `auto`, and `editly`
+select the Editly renderer. `ffmpeg-native` selects the constrained native
+FFmpeg adapter for simple high-throughput timelines. `hyperframes` remains a
+reserved but unavailable renderer name.
 
 VidAPI validates renderer capabilities before direct render jobs are persisted,
 queued, or compiled. Unsupported renderers return `UNSUPPORTED_RENDERER`.
 Unsupported renderer-feature combinations return `UNSUPPORTED_RENDERER_FEATURE`
 with bounded context. See
 [Renderer Capabilities](docs/renderer-capabilities.md) for the support matrix
-and extension contract.
+and extension contract. See
+[Native FFmpeg Renderer](docs/native-ffmpeg-renderer.md) for the native subset,
+replay artifacts, and rejection behavior.
 
 ### Transitions
 
@@ -206,10 +209,11 @@ constraints, and renderer support notes.
 
 ### Output Formats And Presets
 
-`output.format` supports `mp4`, `webm`, `gif`, and `png-sequence`. Editly
-produces a deterministic MP4 intermediate; WebM, GIF, and PNG sequence outputs
-are finished with FFmpeg before storage. PNG sequence downloads are zip archives
-and expose `manifest.json` through the render artifact endpoint.
+`output.format` supports `mp4`, `webm`, `gif`, and `png-sequence`. Editly and
+the native FFmpeg renderer both produce deterministic MP4 intermediates; WebM,
+GIF, and PNG sequence outputs are finished with FFmpeg before storage. PNG
+sequence downloads are zip archives and expose `manifest.json` through the
+render artifact endpoint.
 
 `output.preset` supports `tiktok`, `reels`, `shorts`, `youtube`, `square-ad`,
 and `preview-low`. Explicit `output.width` and `output.height` override preset

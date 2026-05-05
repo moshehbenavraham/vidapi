@@ -8,6 +8,7 @@ from httpx import AsyncClient
 
 from app.db import render_crud
 from app.models.composition import Composition
+from app.renderers.base import CompiledRender, RenderArtifact
 from app.services.output_postprocess import FinishedOutput
 from app.services.render_service import RenderService
 
@@ -154,3 +155,138 @@ async def test_render_service_resolves_explicit_editly(
     assert render.renderer == "editly"
     assert isinstance(mock_renderer.compile, AsyncMock)
     mock_renderer.compile.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_direct_render_with_explicit_native_persists_native(
+    client: AsyncClient,
+    db_session,
+    render_service: RenderService,
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "native"
+    workspace.mkdir()
+    spec_path = workspace / "compiled.ffmpeg.json"
+    spec_path.write_text("{}", encoding="ascii")
+    replay_path = workspace / "replay.json"
+    replay_path.write_text("{}", encoding="ascii")
+    output_path = workspace / "native.mp4"
+    output_path.write_bytes(b"video")
+    log_path = workspace / "render.log"
+    log_path.write_text("OK", encoding="utf-8")
+
+    native_renderer = MagicMock()
+    native_renderer.name = "ffmpeg-native"
+    native_renderer.compile = AsyncMock(
+        return_value=CompiledRender(
+            spec_path=spec_path,
+            replay_path=replay_path,
+            workspace=workspace,
+            renderer_name="ffmpeg-native",
+            spec_json="{}",
+        )
+    )
+    native_renderer.render = AsyncMock(
+        return_value=RenderArtifact(
+            output_path=output_path,
+            poster_path=None,
+            log_path=log_path,
+            duration_seconds=1.0,
+            exit_code=0,
+        )
+    )
+    render_service._renderer_resolver = lambda name=None: native_renderer
+
+    payload = {
+        "renderer": "ffmpeg-native",
+        "timeline": {
+            "background": "#000000",
+            "tracks": [
+                {
+                    "clips": [
+                        {
+                            "asset": {"type": "color", "color": "#000000"},
+                            "length": 1.0,
+                        }
+                    ]
+                }
+            ],
+        },
+        "output": {"format": "mp4", "width": 320, "height": 180, "fps": 24},
+    }
+
+    response = await client.post("/v1/renders", json=payload)
+
+    assert response.status_code == 202
+    render = await render_crud.get_render_by_id(db_session, response.json()["id"])
+    assert render is not None
+    assert render.renderer == "ffmpeg-native"
+    native_renderer.compile.assert_awaited_once()
+    native_renderer.render.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_render_service_resolves_explicit_native_for_compile(
+    db_session,
+    test_storage,
+    mock_asset_service,
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "native-compile"
+    workspace.mkdir()
+    spec_path = workspace / "compiled.ffmpeg.json"
+    spec_path.write_text("{}", encoding="ascii")
+    replay_path = workspace / "replay.json"
+    replay_path.write_text("{}", encoding="ascii")
+    native_renderer = MagicMock()
+    native_renderer.name = "ffmpeg-native"
+    native_renderer.compile = AsyncMock(
+        return_value=CompiledRender(
+            spec_path=spec_path,
+            replay_path=replay_path,
+            workspace=workspace,
+            renderer_name="ffmpeg-native",
+            spec_json="{}",
+        )
+    )
+    editly_renderer = MagicMock()
+    editly_renderer.name = "editly"
+    service = RenderService(
+        storage=test_storage,
+        asset_service=mock_asset_service,
+        renderer=editly_renderer,
+        renderer_resolver=lambda name=None: native_renderer,
+    )
+    composition = Composition.model_validate(
+        {
+            "renderer": "ffmpeg-native",
+            "timeline": {
+                "tracks": [
+                    {
+                        "clips": [
+                            {
+                                "asset": {"type": "color", "color": "#000000"},
+                                "length": 1.0,
+                            }
+                        ]
+                    }
+                ]
+            },
+            "output": {"format": "mp4", "width": 320, "height": 180},
+        }
+    )
+    render = await render_crud.create_render(db_session)
+    job_workspace = await test_storage.create_workspace(render.id)
+
+    compiled = await service.stage_resolve_and_compile(
+        composition,
+        render.id,
+        job_workspace,
+        db_session,
+    )
+
+    assert compiled.renderer_name == "ffmpeg-native"
+    native_renderer.compile.assert_awaited_once()
+    stored = await render_crud.get_render_by_id(db_session, render.id)
+    assert stored is not None
+    assert stored.renderer == "ffmpeg-native"

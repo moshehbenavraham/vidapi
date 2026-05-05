@@ -12,6 +12,8 @@ from app.core.redis import get_arq_pool
 from app.db.session import get_session
 from app.renderers import (
     DEFAULT_RENDERER,
+    FFMPEG_NATIVE_RENDERER,
+    NativeFfmpegRenderer,
     RendererProtocol,
     RendererResolver,
     select_renderer,
@@ -77,11 +79,19 @@ def get_editly_renderer() -> EditlyRenderer:
 
 
 @lru_cache(maxsize=1)
+def get_native_ffmpeg_renderer() -> NativeFfmpegRenderer:
+    settings = get_settings()
+    return NativeFfmpegRenderer(settings=settings)
+
+
+@lru_cache(maxsize=1)
 def get_renderer_resolver() -> RendererResolver:
     def _resolve(renderer_name: str | None = None) -> RendererProtocol:
         selection = select_renderer(renderer_name)
         if selection.renderer == DEFAULT_RENDERER:
             return get_editly_renderer()
+        if selection.renderer == FFMPEG_NATIVE_RENDERER:
+            return get_native_ffmpeg_renderer()
         msg = f"No renderer implementation configured for {selection.renderer}"
         raise ValueError(msg)
 

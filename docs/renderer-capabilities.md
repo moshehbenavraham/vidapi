@@ -13,7 +13,7 @@ work.
 | `null` | `editly` | Treated the same as omitted. |
 | `auto` | `editly` | Selects the best available renderer; currently Editly. |
 | `editly` | `editly` | Explicit Editly rendering. |
-| `ffmpeg-native` | none | Reserved for a future adapter; currently rejected. |
+| `ffmpeg-native` | `ffmpeg-native` | Explicit native FFmpeg rendering for the supported simple subset. |
 | `hyperframes` | none | Reserved for a future adapter; currently rejected. |
 
 Unknown renderer names are rejected by request schema validation. Known but
@@ -35,6 +35,25 @@ Editly always renders an MP4 intermediate. WebM, GIF, and PNG sequence outputs
 are supported through the shared FFmpeg output post-processing path.
 Captions and request-level posters are implemented in the shared finishing path
 around that intermediate, not by exposing Editly-native caption schemas.
+
+## Native FFmpeg Support Matrix
+
+| Feature | Supported values |
+|---------|------------------|
+| Asset types | `video`, `image`, `text`, `audio`, `color` |
+| Output formats | `mp4`, `webm`, `gif`, `png-sequence` |
+| Transitions | none |
+| Captions | none |
+| Poster controls | none |
+| Fit modes | `cover`, `contain`, `stretch`, `none` |
+| Audio | soundtrack and detached audio with trim, delay, volume, and `amix` |
+
+The native renderer produces an MP4 intermediate and relies on the same shared
+finishing path for WebM, GIF, PNG sequence, storage, logs, and default poster
+generation. It consumes resolved local asset paths only. Unsupported native
+features such as transitions, captions, poster controls, transforms, audio
+effects, invalid colors, unresolved assets, and client-supplied filters are
+rejected before FFmpeg work.
 
 ## Error Semantics
 

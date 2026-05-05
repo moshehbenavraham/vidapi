@@ -17,6 +17,7 @@ from app.api.deps import (
     get_asset_service,
     get_editly_renderer,
     get_local_storage,
+    get_native_ffmpeg_renderer,
     get_render_service,
     get_renderer_resolver,
     get_storage_backend,
@@ -49,6 +50,7 @@ def reset_app_settings_cache() -> Iterator[None]:
     get_storage_url_resolver.cache_clear()
     get_asset_service.cache_clear()
     get_editly_renderer.cache_clear()
+    get_native_ffmpeg_renderer.cache_clear()
     get_renderer_resolver.cache_clear()
     get_render_service.cache_clear()
     get_template_service.cache_clear()
@@ -59,6 +61,7 @@ def reset_app_settings_cache() -> Iterator[None]:
     get_storage_url_resolver.cache_clear()
     get_asset_service.cache_clear()
     get_editly_renderer.cache_clear()
+    get_native_ffmpeg_renderer.cache_clear()
     get_renderer_resolver.cache_clear()
     get_render_service.cache_clear()
     get_template_service.cache_clear()

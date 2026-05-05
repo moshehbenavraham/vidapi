@@ -39,6 +39,7 @@ from app.renderers.capabilities import (
     validate_renderer_capabilities,
 )
 from app.renderers.poster import PosterError, generate_poster, resolve_poster_plan
+from app.renderers.timeline import asset_resolver_key
 from app.services.asset_service import AssetService
 from app.services.caption_finishing import (
     CaptionFinisher,
@@ -588,7 +589,7 @@ class RenderService:
             resolved = await self._asset_service.resolve_asset(
                 "", text_asset=asset, workspace=workspace
             )
-            return "", str(resolved.local_path)
+            return asset_resolver_key(clip) or "", str(resolved.local_path)
 
         return None
 
