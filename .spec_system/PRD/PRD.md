@@ -1038,7 +1038,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 | Phase | Name | Sessions | Status |
 |-------|------|----------|--------|
 | 00 | Foundation | 5 | Complete (5/5) |
-| 01 | Async Jobs and Multi-track | 5 | In Progress (3/5) |
+| 01 | Async Jobs and Multi-track | 5 | In Progress (4/5) |
 | 02 | Templates and Polish | TBD | Not Started |
 | 03 | Production Hardening | TBD | Not Started |
 | 04 | Advanced Rendering | TBD | Not Started |

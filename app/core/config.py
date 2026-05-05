@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     editly_timeout_seconds: int = 600
     editly_fast_mode: bool = False
 
+    ffmpeg_bin: str = "ffmpeg"
+    audio_mix_timeout_seconds: int = 120
+
     progress_update_interval_seconds: float = 2.0
 
     poster_enabled: bool = True

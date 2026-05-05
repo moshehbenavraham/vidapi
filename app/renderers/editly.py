@@ -30,10 +30,27 @@ from app.renderers.base import (
     RenderArtifact,
     RenderError,
 )
+from app.services.audio_mixer import AudioMixError, AudioMixPlan, AudioSource, mix_audio
 
 logger = structlog.get_logger(__name__)
 
 EPSILON = 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Data structures for audio clip references
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AudioClipRef:
+    """A detached audio clip extracted from a track for FFmpeg mixing."""
+
+    src: str
+    start: float
+    length: float
+    trim: float | None
+    volume: float
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +265,79 @@ def map_clip_to_layer(clip: Clip, active_clip: ActiveClip) -> dict[str, Any] | N
 
 
 # ---------------------------------------------------------------------------
+# Audio Clip Collection
+# ---------------------------------------------------------------------------
+
+
+def collect_track_audio(tracks: list[Track]) -> list[AudioClipRef]:
+    """Walk composition tracks and extract AudioAsset clips with timeline positions."""
+    refs: list[AudioClipRef] = []
+    for track in tracks:
+        for clip in track.clips:
+            if isinstance(clip.asset, AudioAsset):
+                refs.append(
+                    AudioClipRef(
+                        src=clip.asset.src,
+                        start=clip.start,
+                        length=clip.length,
+                        trim=clip.asset.trim,
+                        volume=clip.asset.volume,
+                    )
+                )
+    return refs
+
+
+def needs_audio_mixing(tracks: list[Track]) -> bool:
+    """Return True if any track contains a detached AudioAsset clip."""
+    for track in tracks:
+        for clip in track.clips:
+            if isinstance(clip.asset, AudioAsset):
+                return True
+    return False
+
+
+def compile_audio_plan(
+    audio_refs: list[AudioClipRef],
+    soundtrack: AudioAsset | None,
+    *,
+    asset_path_resolver: dict[str, str] | None = None,
+) -> AudioMixPlan:
+    """Build an AudioMixPlan from collected audio refs and optional soundtrack."""
+    sources: list[AudioSource] = []
+
+    if soundtrack is not None:
+        src_path = soundtrack.src
+        if asset_path_resolver:
+            src_path = asset_path_resolver.get(src_path, src_path)
+        sources.append(
+            AudioSource(
+                path=src_path,
+                delay_ms=0,
+                trim_start=soundtrack.trim,
+                trim_duration=None,
+                volume=soundtrack.volume,
+            )
+        )
+
+    for ref in audio_refs:
+        src_path = ref.src
+        if asset_path_resolver:
+            src_path = asset_path_resolver.get(src_path, src_path)
+        delay_ms = round(ref.start * 1000)
+        sources.append(
+            AudioSource(
+                path=src_path,
+                delay_ms=delay_ms,
+                trim_start=ref.trim,
+                trim_duration=ref.length if ref.trim is not None else None,
+                volume=ref.volume,
+            )
+        )
+
+    return AudioMixPlan(sources=sources)
+
+
+# ---------------------------------------------------------------------------
 # Audio / Soundtrack Mapper
 # ---------------------------------------------------------------------------
 
@@ -285,8 +375,13 @@ def assemble_editly_spec(
     output_path: str,
     *,
     asset_path_resolver: dict[str, str] | None = None,
+    use_external_audio: bool = False,
 ) -> dict[str, Any]:
-    """Assemble the full Editly JSON spec from segments and composition settings."""
+    """Assemble the full Editly JSON spec from segments and composition settings.
+
+    When use_external_audio is True, soundtrack is excluded from Editly
+    audioTracks to avoid double-mixing with the FFmpeg post-processing step.
+    """
     clips: list[dict[str, Any]] = []
 
     for segment in segments:
@@ -337,9 +432,10 @@ def assemble_editly_spec(
     if settings.editly_fast_mode:
         spec["fast"] = True
 
-    audio_tracks = map_soundtrack(composition.timeline.soundtrack)
-    if audio_tracks:
-        spec["audioTracks"] = audio_tracks
+    if not use_external_audio:
+        audio_tracks = map_soundtrack(composition.timeline.soundtrack)
+        if audio_tracks:
+            spec["audioTracks"] = audio_tracks
 
     return spec
 
@@ -492,6 +588,17 @@ class EditlyRenderer:
         if not segments:
             raise CompileError("No segments generated from composition")
 
+        use_external = needs_audio_mixing(composition.timeline.tracks)
+        audio_plan: AudioMixPlan | None = None
+
+        if use_external:
+            audio_refs = collect_track_audio(composition.timeline.tracks)
+            audio_plan = compile_audio_plan(
+                audio_refs,
+                composition.timeline.soundtrack,
+                asset_path_resolver=asset_path_resolver,
+            )
+
         output_filename = f"{render_id}.mp4"
         output_path = str(workspace / output_filename)
 
@@ -500,6 +607,7 @@ class EditlyRenderer:
             composition,
             output_path,
             asset_path_resolver=asset_path_resolver,
+            use_external_audio=use_external,
         )
 
         spec_json = serialize_spec(spec)
@@ -524,6 +632,7 @@ class EditlyRenderer:
             render_id=render_id,
             segments=len(segments),
             spec_path=str(spec_path),
+            has_audio_plan=audio_plan is not None,
         )
 
         return CompiledRender(
@@ -532,6 +641,7 @@ class EditlyRenderer:
             workspace=workspace,
             renderer_name=self.name,
             spec_json=spec_json,
+            audio_mix_plan=audio_plan,
         )
 
     async def render(
@@ -632,6 +742,22 @@ class EditlyRenderer:
             )
             raise error
 
+        if compiled.audio_mix_plan is not None and not compiled.audio_mix_plan.is_empty:
+            try:
+                output_path = await self.post_process_audio(compiled, output_path)
+            except AudioMixError as exc:
+                logger.error(
+                    "audio_post_process_failed",
+                    error=str(exc),
+                    stderr=exc.stderr[:500] if exc.stderr else "",
+                )
+                raise RenderError(
+                    f"Audio post-processing failed: {exc}",
+                    exit_code=exc.exit_code,
+                ) from exc
+
+        elapsed = time.monotonic() - start_time
+
         logger.info(
             "editly_render_complete",
             output_path=str(output_path),
@@ -645,6 +771,35 @@ class EditlyRenderer:
             duration_seconds=round(elapsed, 3),
             exit_code=exit_code or 0,
         )
+
+    async def post_process_audio(
+        self,
+        compiled: CompiledRender,
+        output_path: Path,
+    ) -> Path:
+        """Mix audio sources into rendered video when an audio plan exists.
+
+        Replaces the output file with the mixed version. Cleans up the
+        intermediate file on both success and failure.
+        """
+        if compiled.audio_mix_plan is None or compiled.audio_mix_plan.is_empty:
+            return output_path
+
+        mixed_path = output_path.with_suffix(".mixed.mp4")
+        try:
+            await mix_audio(
+                output_path,
+                mixed_path,
+                compiled.audio_mix_plan,
+                settings=self._settings,
+            )
+            output_path.unlink(missing_ok=True)
+            mixed_path.rename(output_path)
+            logger.info("audio_post_process_complete", output=str(output_path))
+            return output_path
+        except AudioMixError:
+            mixed_path.unlink(missing_ok=True)
+            raise
 
     async def _stream_stderr(
         self,

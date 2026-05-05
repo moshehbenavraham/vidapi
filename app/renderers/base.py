@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from app.models.composition import Composition
+
+if TYPE_CHECKING:
+    from app.services.audio_mixer import AudioMixPlan
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,7 @@ class CompiledRender:
     workspace: Path
     renderer_name: str
     spec_json: str
+    audio_mix_plan: AudioMixPlan | None = field(default=None)
 
 
 @dataclass(frozen=True)
