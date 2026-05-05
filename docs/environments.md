@@ -19,7 +19,7 @@
 | Redis | Not used | localhost:6379 | redis:6379 internal | redis:// with AUTH | rediss:// with AUTH |
 | Debug mode | true | true | false | false | false |
 | Log format | Console | Console | JSON | JSON | JSON |
-| Asset HTTP | Allowed | Allowed | Allowed | HTTPS only | HTTPS only |
+| Asset HTTP | Disabled by default | Disabled by default | Disabled by default | HTTPS only | HTTPS only |
 | Auth | None | None | Optional | API key required | API key required |
 | Webhook secret | Optional | Optional | Optional | Configured | Configured |
 | Metrics | Optional ops endpoint | Optional ops endpoint | Ops endpoint | Ops endpoint | Ops endpoint plus scraper |

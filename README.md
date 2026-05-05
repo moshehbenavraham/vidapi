@@ -323,8 +323,8 @@ and a `Retry-After` header.
 
 ## Project Status
 
-Phases 00, 01, 02, and 03 are complete; Phase 04 is in progress. See
-[PRD](.spec_system/PRD/PRD.md) for current progress and roadmap.
+Phases 00, 01, 02, 03, and 04 are complete. See
+[PRD](.spec_system/PRD/PRD.md) for the archived roadmap and session history.
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -332,7 +332,7 @@ Phases 00, 01, 02, and 03 are complete; Phase 04 is in progress. See
 | 01 | Async Jobs and Multi-track | Complete (5/5 sessions) |
 | 02 | Templates and Polish | Complete (5/5 sessions) |
 | 03 | Production Hardening | Complete (5/5 sessions) |
-| 04 | Advanced Rendering | Not Started |
+| 04 | Advanced Rendering | Complete (6/6 sessions) |
 
 ## License
 

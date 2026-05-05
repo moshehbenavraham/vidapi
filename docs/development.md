@@ -3,7 +3,7 @@
 ## Required Tools
 
 - Python 3.11+ (tested with 3.12.3)
-- Node.js 20+ (tested with v24.14.0)
+- Node.js 22+ (tested with v24.14.0)
 - FFmpeg 6+ and ffprobe (tested with 6.1.1)
 - uv (recommended package manager)
 

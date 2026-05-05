@@ -28,7 +28,7 @@ Three services run on a shared bridge network:
 ### Image Details
 
 - **Dockerfile.api**: Slim Python image with curl for health checks, non-root `vidapi` user
-- **Dockerfile.worker**: Multi-stage build (node:20-slim for Editly, python:3.11-slim runtime), includes GL libraries and Xvfb for headless rendering, non-root `vidapi` user
+- **Dockerfile.worker**: Multi-stage build (node:22-slim for Editly and HyperFrames, python:3.11-slim runtime), includes GL libraries and Xvfb for headless rendering, non-root `vidapi` user
 
 Environment defaults live in `.env.docker`.
 

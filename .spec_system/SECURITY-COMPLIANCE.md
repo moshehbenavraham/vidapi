@@ -1,7 +1,7 @@
 # Security & Compliance
 
 > Cumulative security posture and GDPR compliance record. Updated between phases via carryforward.
-> **Line budget**: 1000 max | **Last updated**: Phase 03 (2026-05-05)
+> **Line budget**: 1000 max | **Last updated**: Phase 04 (2026-05-05)
 
 ---
 
@@ -14,8 +14,8 @@
 | Open Findings | 0 |
 | Critical/High | 0 |
 | Medium/Low | 0 |
-| Phases Audited | 4 |
-| Last Clean Phase | P03 |
+| Phases Audited | 5 |
+| Last Clean Phase | P04 |
 
 ---
 
@@ -37,7 +37,7 @@ No open findings.
 
 ### Overall: N/A
 
-No personal data is collected, stored, or processed by VidAPI. The service accepts JSON composition definitions containing media asset references (URLs, text strings for overlays) and rendering parameters. No user PII enters the system.
+No personal data is collected, stored, or processed by VidAPI. The service accepts JSON composition definitions containing media asset references, text strings for overlays, and rendering parameters. No user PII enters the system.
 
 ### Personal Data Inventory
 
@@ -51,7 +51,7 @@ No personal data collected or processed.
 | Consent obtained before data storage | N/A | No personal data collected |
 | Data minimization verified | N/A | No personal data in scope |
 | Deletion/erasure path exists | N/A | No personal data stored |
-| No PII in application logs | PASS | Logs contain only render_id, file paths, hashes, error codes, stage names, and timing metadata |
+| No PII in application logs | PASS | Logs contain render_id, file paths, hashes, error codes, stage names, and timing metadata only |
 | Third-party transfers documented | N/A | No external services contacted beyond user-provided asset URLs and deployment-controlled storage targets |
 
 ---
@@ -62,7 +62,7 @@ No personal data collected or processed.
 
 None known.
 
-**Dependencies audited (Phase 03):**
+**Dependencies audited (Phase 04):**
 - fastapi 0.136.1, starlette 0.52.1, pydantic, pydantic-settings -- web framework stack
 - arq 0.28.0, redis[hiredis] 5.3.1 -- queue and cache stack
 - sqlmodel, aiosqlite, alembic, asyncpg -- database stack
@@ -70,7 +70,7 @@ None known.
 - Jinja2 3.1.x -- template expansion engine
 - Pillow -- text-to-image rendering
 - structlog -- structured logging
-- System-level: FFmpeg 6.1.1, Node.js v24.14.0, Editly (Node subprocess)
+- System-level: FFmpeg 6.1.1, Node.js 22.x in the worker image, Editly, HyperFrames/browser runtime dependencies
 - Docker base images: python:3.11-slim, node:20-slim, redis:7-alpine, postgres:16-alpine, MinIO
 
 ---
@@ -99,6 +99,7 @@ None known.
 | P01 | 5 | PASS | N/A | 0 | 0 |
 | P02 | 5 | PASS | N/A | 0 | 3 |
 | P03 | 5 | PASS | N/A | 0 | 4 |
+| P04 | 6 | PASS | N/A | 0 | 0 |
 
 ---
 
@@ -108,7 +109,8 @@ Actionable items for upcoming phases based on cumulative findings.
 
 1. Keep Redis TLS enabled for managed or cross-host deployments even though AUTH is wired through the compose path.
 2. Prefer Docker secrets or another secret manager for API keys, Postgres, MinIO, and webhook secrets in real production.
-3. Revisit authorization if VidAPI grows beyond single-operator self-hosting; current auth is route-level API-key based, not tenant-aware.
+3. Keep the HyperFrames worker runtime pinned and smoke-tested if the adapter remains enabled.
+4. Revisit authorization if VidAPI grows beyond single-operator self-hosting; current auth is route-level API-key based, not tenant-aware.
 
 ---
 

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [ ] Python 3.11+ installed
-- [ ] Node.js 20+ installed (for Editly renderer)
+- [ ] Node.js 22+ installed (for Editly and HyperFrames renderers)
 - [ ] FFmpeg 6+ and ffprobe installed
 - [ ] Redis installed (for async mode; optional for sync-only local dev)
 - [ ] uv package manager installed (recommended) or pip
