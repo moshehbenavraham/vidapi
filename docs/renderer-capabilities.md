@@ -27,11 +27,14 @@ VidAPI error envelope.
 | Asset types | `video`, `image`, `text`, `audio`, `color` |
 | Output formats | `mp4`, `webm`, `gif`, `png-sequence` |
 | Transitions | `fade_in`, `fade_out`, `crossfade` |
-| Captions | not supported yet |
-| Poster controls | not supported yet |
+| Captions | `sidecar`, `burn-in` |
+| Caption sidecar formats | `srt`, `webvtt` |
+| Poster controls | `default`, `timestamp`, `percent`, `disabled` |
 
 Editly always renders an MP4 intermediate. WebM, GIF, and PNG sequence outputs
 are supported through the shared FFmpeg output post-processing path.
+Captions and request-level posters are implemented in the shared finishing path
+around that intermediate, not by exposing Editly-native caption schemas.
 
 ## Error Semantics
 

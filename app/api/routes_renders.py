@@ -378,6 +378,8 @@ async def get_render(
     url = await url_resolver.output_url(render)
     poster = await url_resolver.poster_url(render)
     output = await url_resolver.output_metadata(render)
+    captions = await url_resolver.caption_metadata(render)
+    poster_metadata = await url_resolver.poster_metadata(render)
 
     return RenderResponse(
         id=render.id,
@@ -387,6 +389,8 @@ async def get_render(
         url=url,
         poster=poster,
         output=output,
+        captions=captions,
+        poster_metadata=poster_metadata,
         template_id=render.template_id,
         template_version_id=render.template_version_id,
         created_at=render.created_at,
@@ -481,6 +485,55 @@ async def download_poster(
         url_resolver=url_resolver,
         filename=f"{render_id}.jpg",
         disposition="inline",
+    )
+
+
+@router.get(
+    "/renders/{render_id}/captions",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
+)
+async def download_captions(
+    render_id: str,
+    session: DBSessionDep,
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+) -> Response:
+    """Stream or redirect the render caption sidecar artifact."""
+    render = await render_crud.get_render_by_id(session, render_id)
+    if render is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Render {render_id} not found",
+        )
+
+    render_status = RenderStatus(render.status)
+    if render_status != RenderStatus.SUCCEEDED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Render {render_id} is not complete (status: {render_status.value})"
+            ),
+        )
+
+    if not render.caption_sidecar_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No caption sidecar for render {render_id}",
+        )
+
+    return await _artifact_response(
+        render_id=render_id,
+        artifact_uri=render.caption_sidecar_path,
+        artifact_type=ArtifactType.CAPTION_SIDECAR,
+        storage=storage,
+        url_resolver=url_resolver,
+        filename=render.caption_sidecar_filename or f"{render_id}-captions.srt",
+        disposition="attachment",
+        media_type=render.caption_sidecar_media_type,
     )
 
 

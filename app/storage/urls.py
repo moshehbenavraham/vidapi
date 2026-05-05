@@ -5,8 +5,12 @@ from urllib.parse import quote, urlsplit
 
 from app.api.errors import StorageError
 from app.models.output_artifacts import (
+    RenderCaptionMetadata,
     RenderOutputMetadata,
+    RenderPosterMetadata,
+    caption_metadata_from_render,
     output_metadata_from_render,
+    poster_metadata_from_render,
 )
 from app.models.render import RenderStatus
 from app.storage.base import (
@@ -51,6 +55,8 @@ class StorageUrlResolver:
         encoded_render_id = quote(render_id, safe="")
         if artifact_type is ArtifactType.POSTER:
             return f"{self._api_prefix}/renders/{encoded_render_id}/poster"
+        if artifact_type is ArtifactType.CAPTION_SIDECAR:
+            return f"{self._api_prefix}/renders/{encoded_render_id}/captions"
         if artifact_type is ArtifactType.OUTPUT:
             return f"{self._api_prefix}/renders/{encoded_render_id}/download"
         encoded_artifact = quote(artifact_type.value, safe="")
@@ -79,6 +85,16 @@ class StorageUrlResolver:
             ArtifactType.POSTER,
         )
 
+    async def caption_sidecar_url(self, render: Any) -> str | None:
+        sidecar_path = getattr(render, "caption_sidecar_path", None)
+        if not sidecar_path:
+            return None
+        return await self.artifact_url(
+            render.id,
+            sidecar_path,
+            ArtifactType.CAPTION_SIDECAR,
+        )
+
     async def manifest_url(self, render: Any) -> str | None:
         manifest_path = getattr(render, "output_manifest_path", None)
         if not manifest_path:
@@ -94,6 +110,16 @@ class StorageUrlResolver:
             render,
             manifest_url=await self.manifest_url(render),
         )
+
+    async def caption_metadata(self, render: Any) -> RenderCaptionMetadata | None:
+        return caption_metadata_from_render(
+            render,
+            sidecar_url=await self.caption_sidecar_url(render),
+        )
+
+    async def poster_metadata(self, render: Any) -> RenderPosterMetadata | None:
+        poster_url = await self.poster_url(render)
+        return poster_metadata_from_render(render, poster_url=poster_url)
 
     async def artifact_url(
         self,

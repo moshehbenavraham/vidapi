@@ -119,6 +119,7 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 | `DELETE` | `/v1/renders/{id}` | Cancel a queued or running render |
 | `GET` | `/v1/renders/{id}/download` | Download rendered output |
 | `GET` | `/v1/renders/{id}/poster` | Download or redirect to a render poster |
+| `GET` | `/v1/renders/{id}/captions` | Download or redirect to a caption sidecar |
 | `GET` | `/v1/renders/{id}/artifacts/manifest.json` | Download PNG sequence manifest metadata |
 
 ### Operational Endpoints
@@ -174,6 +175,34 @@ and expose `manifest.json` through the render artifact endpoint.
 and `preview-low`. Explicit `output.width` and `output.height` override preset
 dimensions, while omitted FPS and quality values use preset defaults.
 
+### Captions And Posters
+
+Render requests may include a top-level `captions` block with timed cues.
+Supported modes are `sidecar` for SRT or WebVTT files and `burn-in` for
+FFmpeg-backed caption burn-in before output conversion.
+
+Poster generation is configured under `output.poster`. Omitting the block keeps
+the service default poster behavior. Supported modes are `default`,
+`timestamp`, `percent`, and `disabled`.
+
+```json
+{
+  "captions": {
+    "mode": "sidecar",
+    "format": "srt",
+    "cues": [{"start": 0, "duration": 1.5, "text": "Hello"}]
+  },
+  "output": {
+    "format": "mp4",
+    "poster": {"mode": "timestamp", "timestamp": 0.5}
+  }
+}
+```
+
+Succeeded status responses and webhook payloads can include structured
+`captions` and `poster_metadata` fields. See
+[Captions and Posters](docs/captions-and-posters.md) for details.
+
 ### API Authentication
 
 `GET /health` and `GET /v1/health` are always public. When
@@ -219,6 +248,7 @@ and a `Retry-After` header.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Renderer Capabilities](docs/renderer-capabilities.md)
 - [Output Formats](docs/output-formats.md)
+- [Captions and Posters](docs/captions-and-posters.md)
 - [Deployment](docs/deployment.md)
 - [Environments](docs/environments.md)
 - [Operations](docs/operations.md)

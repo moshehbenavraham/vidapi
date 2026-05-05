@@ -26,6 +26,7 @@ class ArtifactType(StrEnum):
     OUTPUT = "output"
     MANIFEST = "manifest.json"
     POSTER = "poster.jpg"
+    CAPTION_SIDECAR = "captions"
     REPLAY = "replay.json"
     LOG = "logs.txt"
 
@@ -38,6 +39,7 @@ class ArtifactDescriptor:
 
 
 DEFAULT_OUTPUT_SUFFIX = ".mp4"
+DEFAULT_CAPTION_SIDECAR_SUFFIX = ".srt"
 RENDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 ARTIFACT_SUFFIX_PATTERN = re.compile(r"^\.[A-Za-z0-9]+$")
 
@@ -48,6 +50,7 @@ ARTIFACT_MEDIA_TYPES: dict[ArtifactType, str] = {
     ArtifactType.OUTPUT: "video/mp4",
     ArtifactType.MANIFEST: "application/json",
     ArtifactType.POSTER: "image/jpeg",
+    ArtifactType.CAPTION_SIDECAR: "application/x-subrip",
     ArtifactType.REPLAY: "application/json",
     ArtifactType.LOG: "text/plain; charset=utf-8",
 }
@@ -76,6 +79,11 @@ def artifact_filename(artifact_type: ArtifactType, suffix: str = "") -> str:
     normalized_suffix = normalize_artifact_suffix(suffix)
     if artifact_type is ArtifactType.OUTPUT:
         return f"{artifact_type.value}{normalized_suffix or DEFAULT_OUTPUT_SUFFIX}"
+    if artifact_type is ArtifactType.CAPTION_SIDECAR:
+        return (
+            f"{artifact_type.value}"
+            f"{normalized_suffix or DEFAULT_CAPTION_SIDECAR_SUFFIX}"
+        )
     return artifact_type.value
 
 

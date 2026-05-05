@@ -7,17 +7,24 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import StorageError
+from app.core.config import get_settings
 from app.db import render_crud
 from app.db.models import Render
 from app.models.composition import (
     AudioAsset,
+    CaptionMode,
     Clip,
     Composition,
     ImageAsset,
+    PosterMode,
     TextAsset,
     VideoAsset,
 )
-from app.models.output_artifacts import StoredOutputMetadata
+from app.models.output_artifacts import (
+    StoredCaptionMetadata,
+    StoredOutputMetadata,
+    StoredPosterMetadata,
+)
 from app.models.render import RenderStatus
 from app.renderers import get_renderer
 from app.renderers.base import (
@@ -31,8 +38,13 @@ from app.renderers.capabilities import (
     RendererCapabilityError,
     validate_renderer_capabilities,
 )
-from app.renderers.poster import PosterError, generate_poster
+from app.renderers.poster import PosterError, generate_poster, resolve_poster_plan
 from app.services.asset_service import AssetService
+from app.services.caption_finishing import (
+    CaptionFinisher,
+    CaptionFinishingError,
+    CaptionFinishResult,
+)
 from app.services.merge import MergeError, expand_merge_variables
 from app.services.output_postprocess import OutputPostprocessor
 from app.storage.base import ArtifactStorageProtocol, ArtifactType
@@ -70,12 +82,14 @@ class RenderService:
         renderer: RendererProtocol,
         renderer_resolver: RendererResolver | None = None,
         output_postprocessor: OutputPostprocessor | None = None,
+        caption_finisher: CaptionFinisher | None = None,
     ) -> None:
         self._storage = storage
         self._asset_service = asset_service
         self._renderer = renderer
         self._renderer_resolver = renderer_resolver or get_renderer
         self._output_postprocessor = output_postprocessor or OutputPostprocessor()
+        self._caption_finisher = caption_finisher or CaptionFinisher()
 
     def _resolve_renderer(self, renderer_name: str) -> RendererProtocol:
         if self._renderer.name == renderer_name:
@@ -319,6 +333,9 @@ class RenderService:
 
         Raises RenderServiceError on render failures.
         """
+        await render_crud.clear_render_caption_metadata(session, render_id)
+        await render_crud.clear_render_poster_metadata(session, render_id)
+
         renderer = self._resolve_renderer(compiled.renderer_name)
         try:
             artifact = await renderer.render(
@@ -331,15 +348,34 @@ class RenderService:
                 str(exc), error_code="RENDER_ERROR", cause=exc
             ) from exc
 
+        caption_result: CaptionFinishResult | None = None
+        artifact_for_finishing = artifact
+        if composition.captions is not None:
+            try:
+                caption_result = await self._caption_finisher.finish(
+                    captions=composition.captions,
+                    artifact=artifact,
+                    render_id=render_id,
+                    workspace=workspace,
+                )
+                artifact_for_finishing = caption_result.video_artifact
+            except CaptionFinishingError as exc:
+                await render_crud.clear_render_caption_metadata(session, render_id)
+                raise RenderServiceError(
+                    str(exc), error_code="RENDER_ERROR", cause=exc
+                ) from exc
+
         try:
             finished = await self._output_postprocessor.finish(
                 composition=composition,
-                artifact=artifact,
+                artifact=artifact_for_finishing,
                 render_id=render_id,
                 workspace=workspace,
             )
         except RenderError as exc:
             await render_crud.clear_render_output_metadata(session, render_id)
+            await render_crud.clear_render_caption_metadata(session, render_id)
+            await render_crud.clear_render_poster_metadata(session, render_id)
             raise RenderServiceError(
                 str(exc), error_code="RENDER_ERROR", cause=exc
             ) from exc
@@ -374,44 +410,118 @@ class RenderService:
             output_path=output_uri,
         )
 
-        poster_path: Path | None = None
-        try:
-            poster_path = await generate_poster(
-                artifact.output_path,
-                workspace / "poster.jpg",
-                video_duration=artifact.duration_seconds,
-            )
-        except PosterError:
-            await logger.awarning(
-                "poster_generation_failed_nonfatal", render_id=render_id
-            )
+        if composition.captions is not None and caption_result is not None:
+            if caption_result.sidecar is not None:
+                sidecar = caption_result.sidecar
+                sidecar_uri = await self._publish_file(
+                    render_id,
+                    ArtifactType.CAPTION_SIDECAR,
+                    sidecar.path,
+                    suffix=sidecar.spec.suffix,
+                    media_type=sidecar.spec.media_type,
+                )
+                await render_crud.update_render_caption_metadata(
+                    session,
+                    render_id,
+                    metadata=StoredCaptionMetadata(
+                        mode=CaptionMode.SIDECAR,
+                        format=sidecar.spec.caption_format,
+                        sidecar_media_type=sidecar.spec.media_type,
+                        sidecar_filename=sidecar.spec.filename,
+                        cue_count=len(composition.captions.cues),
+                        burned_in=False,
+                    ),
+                    sidecar_path=sidecar_uri,
+                )
+            else:
+                await render_crud.update_render_caption_metadata(
+                    session,
+                    render_id,
+                    metadata=StoredCaptionMetadata(
+                        mode=CaptionMode.BURN_IN,
+                        format=None,
+                        cue_count=len(composition.captions.cues),
+                        burned_in=True,
+                    ),
+                )
 
-        if poster_path is not None:
+        settings = get_settings()
+        poster_path: Path | None = None
+        poster_plan = None
+        try:
+            poster_plan = resolve_poster_plan(
+                composition.output.poster,
+                settings=settings,
+                video_duration=artifact_for_finishing.duration_seconds,
+            )
+        except PosterError as exc:
+            await render_crud.clear_render_poster_metadata(session, render_id)
+            raise RenderServiceError(
+                str(exc), error_code="RENDER_ERROR", cause=exc
+            ) from exc
+
+        if poster_plan is not None and not poster_plan.should_generate:
+            await render_crud.update_render_poster_metadata(
+                session,
+                render_id,
+                metadata=StoredPosterMetadata(mode=PosterMode.DISABLED),
+                poster_path=None,
+            )
+        else:
+            try:
+                poster_path = await generate_poster(
+                    artifact_for_finishing.output_path,
+                    workspace / "poster.jpg",
+                    settings=settings,
+                    video_duration=artifact_for_finishing.duration_seconds,
+                    poster_options=composition.output.poster,
+                )
+            except PosterError as exc:
+                await render_crud.clear_render_poster_metadata(session, render_id)
+                if (
+                    composition.output.poster is not None
+                    and composition.output.poster.mode is not PosterMode.DEFAULT
+                ):
+                    raise RenderServiceError(
+                        str(exc), error_code="RENDER_ERROR", cause=exc
+                    ) from exc
+                await logger.awarning(
+                    "poster_generation_failed_nonfatal",
+                    render_id=render_id,
+                )
+
+        if poster_path is not None and poster_plan is not None:
             poster_uri = await self._publish_file(
                 render_id,
                 ArtifactType.POSTER,
                 poster_path,
             )
-            await render_crud.update_render_paths(
+            await render_crud.update_render_poster_metadata(
                 session,
                 render_id,
+                metadata=StoredPosterMetadata(
+                    mode=poster_plan.mode,
+                    timestamp_seconds=poster_plan.seek_seconds,
+                    media_type="image/jpeg",
+                    filename=f"{render_id}.jpg",
+                ),
                 poster_path=poster_uri,
             )
 
         log_path = workspace / "logs.txt"
         log_parts: list[str] = []
-        if artifact.log_path.exists():
-            log_parts.append(
-                artifact.log_path.read_text(encoding="utf-8", errors="replace")
-            )
-        if (
-            finished.log_path is not None
-            and finished.log_path != artifact.log_path
-            and finished.log_path.exists()
+        seen_log_paths: set[Path] = set()
+        for candidate in (
+            artifact.log_path,
+            caption_result.burn_in_log_path if caption_result else None,
+            finished.log_path,
         ):
-            log_parts.append(
-                finished.log_path.read_text(encoding="utf-8", errors="replace")
-            )
+            if candidate is None:
+                continue
+            if candidate in seen_log_paths or not candidate.exists():
+                continue
+            seen_log_paths.add(candidate)
+            log_parts.append(candidate.read_text(encoding="utf-8", errors="replace"))
         if log_parts:
             log_path.write_text("\n".join(log_parts), encoding="utf-8")
             durable_log_uri = await self._publish_file(

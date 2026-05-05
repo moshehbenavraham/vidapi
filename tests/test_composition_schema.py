@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from app.models.composition import (
     AspectRatio,
     AudioAsset,
+    CaptionFormat,
+    CaptionMode,
     Clip,
     ColorAsset,
     Composition,
@@ -16,6 +18,7 @@ from app.models.composition import (
     Offset,
     Output,
     OutputFormat,
+    PosterMode,
     QualityPreset,
     ResolutionPreset,
     TextAsset,
@@ -320,6 +323,94 @@ class TestOutput:
     def test_fps_over_max_rejected(self) -> None:
         with pytest.raises(ValidationError, match="less_than_equal"):
             Output(fps=120)
+
+
+class TestCaptionAndPosterOptions:
+    def test_caption_duration_resolves_end_time(self) -> None:
+        comp = Composition.model_validate(
+            _minimal_composition(
+                captions={
+                    "mode": "sidecar",
+                    "format": "srt",
+                    "cues": [
+                        {"start": 0.5, "duration": 1.25, "text": "Hello"},
+                    ],
+                }
+            )
+        )
+
+        assert comp.captions is not None
+        assert comp.captions.mode is CaptionMode.SIDECAR
+        assert comp.captions.format is CaptionFormat.SRT
+        assert comp.captions.cues[0].end == 1.75
+
+    def test_caption_cues_are_sorted_deterministically(self) -> None:
+        comp = Composition.model_validate(
+            _minimal_composition(
+                captions={
+                    "cues": [
+                        {"start": 1.0, "end": 1.5, "text": "Second"},
+                        {"start": 0.0, "end": 0.5, "text": "First"},
+                    ],
+                }
+            )
+        )
+
+        assert comp.captions is not None
+        assert [cue.text for cue in comp.captions.cues] == ["First", "Second"]
+
+    def test_overlapping_caption_cues_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not overlap"):
+            Composition.model_validate(
+                _minimal_composition(
+                    captions={
+                        "cues": [
+                            {"start": 0.0, "end": 1.0, "text": "One"},
+                            {"start": 0.5, "end": 1.5, "text": "Two"},
+                        ],
+                    }
+                )
+            )
+
+    def test_blank_caption_text_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            Composition.model_validate(
+                _minimal_composition(
+                    captions={
+                        "cues": [
+                            {"start": 0.0, "duration": 1.0, "text": "   "},
+                        ],
+                    }
+                )
+            )
+
+    def test_caption_style_bounds_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="less_than_equal"):
+            Composition.model_validate(
+                _minimal_composition(
+                    captions={
+                        "cues": [
+                            {"start": 0.0, "duration": 1.0, "text": "Hello"},
+                        ],
+                        "style": {"font_size": 500},
+                    }
+                )
+            )
+
+    def test_poster_timestamp_mode_parses(self) -> None:
+        out = Output(poster={"mode": "timestamp", "timestamp": 1.25})
+
+        assert out.poster is not None
+        assert out.poster.mode is PosterMode.TIMESTAMP
+        assert out.poster.timestamp == 1.25
+
+    def test_poster_timestamp_mode_requires_timestamp(self) -> None:
+        with pytest.raises(ValidationError, match="requires timestamp"):
+            Output(poster={"mode": "timestamp"})
+
+    def test_poster_disabled_mode_rejects_timestamp_fields(self) -> None:
+        with pytest.raises(ValidationError, match="does not accept timestamp fields"):
+            Output(poster={"mode": "disabled", "timestamp": 1.0})
 
 
 # ---------------------------------------------------------------------------

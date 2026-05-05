@@ -31,6 +31,29 @@ class OutputFormat(StrEnum):
     PNG_SEQUENCE = "png-sequence"
 
 
+class CaptionMode(StrEnum):
+    SIDECAR = "sidecar"
+    BURN_IN = "burn-in"
+
+
+class CaptionFormat(StrEnum):
+    SRT = "srt"
+    WEBVTT = "webvtt"
+
+
+class CaptionPosition(StrEnum):
+    TOP = "top"
+    MIDDLE = "middle"
+    BOTTOM = "bottom"
+
+
+class PosterMode(StrEnum):
+    DEFAULT = "default"
+    TIMESTAMP = "timestamp"
+    PERCENT = "percent"
+    DISABLED = "disabled"
+
+
 class OutputPreset(StrEnum):
     TIKTOK = "tiktok"
     REELS = "reels"
@@ -389,8 +412,121 @@ class Timeline(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Caption finishing
+# ---------------------------------------------------------------------------
+
+
+class CaptionStyle(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    font_family: str = Field(default="Inter", min_length=1, max_length=100)
+    font_size: int = Field(default=42, ge=8, le=128)
+    color: str = Field(default="#ffffff", pattern=r"^#[0-9A-Fa-f]{6}$")
+    outline_color: str = Field(default="#000000", pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_color: str | None = Field(
+        default=None,
+        pattern=r"^#[0-9A-Fa-f]{6}$",
+    )
+    position: CaptionPosition = CaptionPosition.BOTTOM
+    align: Literal["left", "center", "right"] = "center"
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+    margin_v: int = Field(default=48, ge=0, le=400)
+
+
+class CaptionCue(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    start: float = Field(ge=0.0)
+    end: float | None = Field(default=None, gt=0.0)
+    duration: float | None = Field(default=None, gt=0.0)
+    text: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("text")
+    @classmethod
+    def _validate_text(cls, value: str) -> str:
+        if not value.strip():
+            msg = "Caption cue text must not be blank"
+            raise ValueError(msg)
+        return value
+
+    @model_validator(mode="after")
+    def _resolve_end_time(self) -> CaptionCue:
+        if self.end is not None and self.duration is not None:
+            msg = "Caption cue must define either end or duration, not both"
+            raise ValueError(msg)
+        if self.end is None and self.duration is None:
+            msg = "Caption cue must define end or duration"
+            raise ValueError(msg)
+        resolved_end = (
+            self.end if self.end is not None else self.start + (self.duration or 0.0)
+        )
+        if resolved_end <= self.start:
+            msg = "Caption cue end must be greater than start"
+            raise ValueError(msg)
+        if self.end is None:
+            object.__setattr__(self, "end", resolved_end)
+        return self
+
+
+class Captions(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    mode: CaptionMode = CaptionMode.SIDECAR
+    format: CaptionFormat = CaptionFormat.SRT
+    cues: list[CaptionCue] = Field(min_length=1, max_length=500)
+    style: CaptionStyle = Field(default_factory=CaptionStyle)
+
+    @model_validator(mode="after")
+    def _validate_cue_ordering(self) -> Captions:
+        ordered = sorted(self.cues, key=lambda cue: (cue.start, cue.end or cue.start))
+        previous_end = 0.0
+        for cue in ordered:
+            cue_end = cue.end or cue.start
+            if cue.start < previous_end:
+                msg = "Caption cues must not overlap"
+                raise ValueError(msg)
+            previous_end = cue_end
+        if ordered != self.cues:
+            object.__setattr__(self, "cues", ordered)
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
+
+
+class PosterOptions(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    mode: PosterMode = PosterMode.DEFAULT
+    timestamp: float | None = Field(default=None, ge=0.0)
+    timestamp_percent: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self) -> PosterOptions:
+        if self.mode is PosterMode.TIMESTAMP:
+            if self.timestamp is None:
+                msg = "Poster timestamp mode requires timestamp"
+                raise ValueError(msg)
+            if self.timestamp_percent is not None:
+                msg = "Poster timestamp mode does not accept timestamp_percent"
+                raise ValueError(msg)
+            return self
+
+        if self.mode is PosterMode.PERCENT:
+            if self.timestamp_percent is None:
+                msg = "Poster percent mode requires timestamp_percent"
+                raise ValueError(msg)
+            if self.timestamp is not None:
+                msg = "Poster percent mode does not accept timestamp"
+                raise ValueError(msg)
+            return self
+
+        if self.timestamp is not None or self.timestamp_percent is not None:
+            msg = f"Poster {self.mode.value} mode does not accept timestamp fields"
+            raise ValueError(msg)
+        return self
 
 
 class Output(BaseModel):
@@ -402,6 +538,7 @@ class Output(BaseModel):
     aspect_ratio: AspectRatio | None = None
     fps: int = Field(default=30, gt=0, le=60)
     quality: QualityPreset = QualityPreset.MEDIUM
+    poster: PosterOptions | None = None
 
     @model_validator(mode="after")
     def _resolve_dimensions(self) -> Output:
@@ -472,6 +609,7 @@ RendererChoice = str
 class Composition(BaseModel):
     timeline: Timeline
     output: Output = Field(default_factory=Output)
+    captions: Captions | None = None
     merge: dict[str, str | int | float | bool] | None = None
     callback: HttpUrl | None = None
     renderer: RendererChoice | None = Field(default=None, max_length=64)

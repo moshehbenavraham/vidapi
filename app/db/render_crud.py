@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from app.db.models import Render
-from app.models.output_artifacts import StoredOutputMetadata
+from app.models.output_artifacts import (
+    StoredCaptionMetadata,
+    StoredOutputMetadata,
+    StoredPosterMetadata,
+)
 from app.models.render import RenderStatus
 
 
@@ -405,6 +409,100 @@ async def clear_render_output_metadata(
     render.output_filename = None
     render.output_frame_count = None
     render.output_manifest_path = None
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def update_render_caption_metadata(
+    session: AsyncSession,
+    render_id: str,
+    *,
+    metadata: StoredCaptionMetadata,
+    sidecar_path: str | None = None,
+) -> Render | None:
+    """Persist caption metadata and sidecar URI on a render atomically."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    render.caption_mode = metadata.mode.value
+    render.caption_format = metadata.format.value if metadata.format else None
+    render.caption_sidecar_path = sidecar_path
+    render.caption_sidecar_media_type = metadata.sidecar_media_type
+    render.caption_sidecar_filename = metadata.sidecar_filename
+    render.caption_cue_count = metadata.cue_count
+    render.caption_burned_in = metadata.burned_in
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def clear_render_caption_metadata(
+    session: AsyncSession,
+    render_id: str,
+) -> Render | None:
+    """Clear caption metadata after a failed or captionless render stage."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    render.caption_mode = None
+    render.caption_format = None
+    render.caption_sidecar_path = None
+    render.caption_sidecar_media_type = None
+    render.caption_sidecar_filename = None
+    render.caption_cue_count = None
+    render.caption_burned_in = None
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def update_render_poster_metadata(
+    session: AsyncSession,
+    render_id: str,
+    *,
+    metadata: StoredPosterMetadata,
+    poster_path: str | None = None,
+) -> Render | None:
+    """Persist poster artifact metadata and URI on a render atomically."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    render.poster_path = poster_path
+    render.poster_mode = metadata.mode.value
+    render.poster_timestamp_seconds = metadata.timestamp_seconds
+    render.poster_media_type = metadata.media_type
+    render.poster_filename = metadata.filename
+    render.updated_at = datetime.now(tz=UTC)
+
+    session.add(render)
+    await _commit_and_refresh(session, render)
+    return render
+
+
+async def clear_render_poster_metadata(
+    session: AsyncSession,
+    render_id: str,
+) -> Render | None:
+    """Clear poster URI and metadata on disabled or failed poster generation."""
+    render = await get_render_by_id(session, render_id)
+    if render is None:
+        return None
+
+    render.poster_path = None
+    render.poster_mode = None
+    render.poster_timestamp_seconds = None
+    render.poster_media_type = None
+    render.poster_filename = None
     render.updated_at = datetime.now(tz=UTC)
 
     session.add(render)

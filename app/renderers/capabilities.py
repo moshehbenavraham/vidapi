@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.models.composition import Composition, OutputFormat, TransitionType
+from app.models.composition import (
+    CaptionFormat,
+    CaptionMode,
+    Composition,
+    OutputFormat,
+    PosterMode,
+    TransitionType,
+)
 from app.services.output_formats import supported_output_formats
 
 AUTO_RENDERER = "auto"
@@ -16,6 +23,16 @@ UNSUPPORTED_RENDERER = "UNSUPPORTED_RENDERER"
 UNSUPPORTED_RENDERER_FEATURE = "UNSUPPORTED_RENDERER_FEATURE"
 MAX_CONTEXT_ITEMS = 10
 MAX_CONTEXT_VALUE_LENGTH = 100
+SUPPORTED_CAPTION_MODES = frozenset({CaptionMode.SIDECAR, CaptionMode.BURN_IN})
+SUPPORTED_CAPTION_FORMATS = frozenset({CaptionFormat.SRT, CaptionFormat.WEBVTT})
+SUPPORTED_POSTER_MODES = frozenset(
+    {
+        PosterMode.DEFAULT,
+        PosterMode.TIMESTAMP,
+        PosterMode.PERCENT,
+        PosterMode.DISABLED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -141,6 +158,8 @@ EDITLY_CAPABILITY = RendererCapability(
             TransitionType.CROSSFADE,
         }
     ),
+    supports_captions=True,
+    supports_poster_options=True,
 )
 
 FFMPEG_NATIVE_CAPABILITY = RendererCapability(
@@ -222,6 +241,45 @@ def validate_renderer_capabilities(composition: Composition) -> RendererSelectio
         requested=composition.output.format,
         supported=capability.output_formats,
     )
+
+    if composition.captions is not None:
+        caption_modes = (
+            SUPPORTED_CAPTION_MODES if capability.supports_captions else frozenset()
+        )
+        _append_issue_if_unsupported(
+            issues,
+            capability=capability,
+            feature="captions.mode",
+            requested=composition.captions.mode,
+            supported=caption_modes,
+        )
+        if composition.captions.mode is CaptionMode.SIDECAR:
+            caption_formats = (
+                SUPPORTED_CAPTION_FORMATS
+                if capability.supports_captions
+                else frozenset()
+            )
+            _append_issue_if_unsupported(
+                issues,
+                capability=capability,
+                feature="captions.format",
+                requested=composition.captions.format,
+                supported=caption_formats,
+            )
+
+    if composition.output.poster is not None:
+        poster_modes = (
+            SUPPORTED_POSTER_MODES
+            if capability.supports_poster_options
+            else frozenset()
+        )
+        _append_issue_if_unsupported(
+            issues,
+            capability=capability,
+            feature="output.poster.mode",
+            requested=composition.output.poster.mode,
+            supported=poster_modes,
+        )
 
     for track_index, track in enumerate(composition.timeline.tracks):
         for clip_index, clip in enumerate(track.clips):

@@ -15,8 +15,12 @@ from app.core.logging import safe_log_excerpt
 from app.db import render_crud, webhook_crud
 from app.db.models import Render
 from app.models.output_artifacts import (
+    RenderCaptionMetadata,
     RenderOutputMetadata,
+    RenderPosterMetadata,
+    caption_metadata_from_render,
     output_metadata_from_render,
+    poster_metadata_from_render,
 )
 from app.storage.factory import build_storage, build_storage_url_resolver
 from app.storage.urls import StorageUrlResolver
@@ -31,6 +35,8 @@ def build_webhook_payload(
     url: str | None = None,
     poster: str | None = None,
     output: RenderOutputMetadata | None = None,
+    captions: RenderCaptionMetadata | None = None,
+    poster_metadata: RenderPosterMetadata | None = None,
 ) -> dict[str, Any]:
     """Construct the PRD-specified webhook payload as a plain dict.
 
@@ -47,6 +53,11 @@ def build_webhook_payload(
         completed_at = render.completed_at.isoformat()
 
     output_metadata = output or output_metadata_from_render(render)
+    caption_metadata = captions or caption_metadata_from_render(render)
+    poster_metadata_value = poster_metadata or poster_metadata_from_render(
+        render,
+        poster_url=poster,
+    )
 
     return {
         "event": event,
@@ -57,6 +68,16 @@ def build_webhook_payload(
         "output": (
             output_metadata.model_dump(mode="json")
             if output_metadata is not None
+            else None
+        ),
+        "captions": (
+            caption_metadata.model_dump(mode="json")
+            if caption_metadata is not None
+            else None
+        ),
+        "poster_metadata": (
+            poster_metadata_value.model_dump(mode="json")
+            if poster_metadata_value is not None
             else None
         ),
         "completed_at": completed_at,
@@ -76,12 +97,26 @@ async def build_storage_aware_webhook_payload(
         if output_metadata_resolver is not None
         else output_metadata_from_render(render)
     )
+    caption_metadata_resolver = getattr(url_resolver, "caption_metadata", None)
+    captions = (
+        await caption_metadata_resolver(render)
+        if caption_metadata_resolver is not None
+        else caption_metadata_from_render(render)
+    )
+    poster_metadata_resolver = getattr(url_resolver, "poster_metadata", None)
+    poster_metadata = (
+        await poster_metadata_resolver(render)
+        if poster_metadata_resolver is not None
+        else poster_metadata_from_render(render)
+    )
     return build_webhook_payload(
         event=event,
         render=render,
         url=await url_resolver.output_url(render),
         poster=await url_resolver.poster_url(render),
         output=output,
+        captions=captions,
+        poster_metadata=poster_metadata,
     )
 
 

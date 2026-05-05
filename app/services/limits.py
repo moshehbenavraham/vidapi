@@ -10,6 +10,7 @@ from app.models.composition import (
     Composition,
     ImageAsset,
     OutputFormat,
+    PosterMode,
     TextAsset,
     VideoAsset,
 )
@@ -135,6 +136,8 @@ def validate_composition_limits(
         code=COMPOSITION_LIMIT_EXCEEDED,
     )
     validate_output_format_limits(composition, settings, stats=stats)
+    validate_caption_limits(composition, settings, stats=stats)
+    validate_poster_limits(composition, stats=stats)
 
 
 def validate_output_format_limits(
@@ -195,6 +198,70 @@ def validate_output_format_limits(
             limit=settings.max_png_sequence_pixels,
             code=COMPOSITION_LIMIT_EXCEEDED,
         )
+
+
+def validate_caption_limits(
+    composition: Composition,
+    settings: Settings,
+    *,
+    stats: CompositionLimitStats | None = None,
+) -> None:
+    """Raise if caption cues or payload size exceed configured guardrails."""
+    if composition.captions is None:
+        return
+    if stats is None:
+        stats = summarize_composition(composition)
+
+    captions = composition.captions
+    _raise_if_exceeds(
+        field="captions.cues",
+        observed=len(captions.cues),
+        limit=settings.max_caption_cues,
+        code=COMPOSITION_LIMIT_EXCEEDED,
+    )
+
+    total_chars = 0
+    for index, cue in enumerate(captions.cues):
+        text_length = len(cue.text)
+        total_chars += text_length
+        _raise_if_exceeds(
+            field=f"captions.cues[{index}].text",
+            observed=text_length,
+            limit=settings.max_caption_text_chars,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+        _raise_if_exceeds(
+            field=f"captions.cues[{index}].end",
+            observed=cue.end or cue.start,
+            limit=stats.duration_seconds,
+            code=COMPOSITION_LIMIT_EXCEEDED,
+        )
+
+    _raise_if_exceeds(
+        field="captions.total_text",
+        observed=total_chars,
+        limit=settings.max_caption_total_text_chars,
+        code=COMPOSITION_LIMIT_EXCEEDED,
+    )
+
+
+def validate_poster_limits(
+    composition: Composition,
+    *,
+    stats: CompositionLimitStats | None = None,
+) -> None:
+    """Raise if explicit poster timestamps exceed render duration."""
+    poster = composition.output.poster
+    if poster is None or poster.mode is not PosterMode.TIMESTAMP:
+        return
+    if stats is None:
+        stats = summarize_composition(composition)
+    _raise_if_exceeds(
+        field="output.poster.timestamp",
+        observed=poster.timestamp or 0.0,
+        limit=stats.duration_seconds,
+        code=COMPOSITION_LIMIT_EXCEEDED,
+    )
 
 
 def validate_media_limits(

@@ -173,6 +173,9 @@ class Settings(BaseSettings):
     max_clips_per_render: int = Field(default=50, ge=1, le=10_000)
     max_tracks_per_render: int = Field(default=50, ge=1, le=1_000)
     max_assets_per_render: int = Field(default=100, ge=1, le=10_000)
+    max_caption_cues: int = Field(default=500, ge=1, le=10_000)
+    max_caption_text_chars: int = Field(default=1000, ge=1, le=100_000)
+    max_caption_total_text_chars: int = Field(default=50_000, ge=1, le=1_000_000)
     max_asset_size_mb: int = Field(default=500, ge=1, le=10_240)
     max_media_duration_seconds: int = Field(default=600, ge=1, le=86_400)
     max_media_width: int = Field(default=3840, ge=1, le=16_384)
@@ -225,6 +228,7 @@ class Settings(BaseSettings):
     ffmpeg_bin: str = "ffmpeg"
     audio_mix_timeout_seconds: int = Field(default=120, ge=1, le=3600)
     output_postprocess_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    caption_burn_in_timeout_seconds: int = Field(default=120, ge=1, le=3600)
     audio_normalization_enabled: bool = False
     audio_fade_duration_seconds: float = Field(default=1.0, gt=0.0)
     subprocess_kill_grace_seconds: float = Field(default=5.0, gt=0.0, le=60.0)

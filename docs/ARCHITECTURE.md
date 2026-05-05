@@ -45,6 +45,7 @@ Render Worker (ARQ consumer)
   |   |   |   |-- FFmpeg (invoked by Editly)
   |   |   |
   |   |   |-- Audio Mixer (FFmpeg post-process for detached audio)
+  |   |   |-- Caption Finisher (sidecars + FFmpeg burn-in)
   |   |   |-- Output Postprocessor (FFmpeg WebM, GIF, PNG sequence finishing)
   |   |   |-- Poster Generator (FFmpeg frame extraction)
   |   |   |-- Webhook Service (HMAC-signed callbacks + retries)
@@ -137,9 +138,14 @@ Local Filesystem (render artifacts)
 - **Tech**: FFmpeg subprocess with explicit timeout, bounded stderr logs, deterministic PNG manifests, and zip archives
 - **Location**: `app/services/output_postprocess.py`, `app/services/output_formats.py`
 
+### Caption Finisher
+- **Purpose**: Writes caption sidecars or burns generated ASS captions into the MP4 intermediate before output conversion
+- **Tech**: Pure SRT/WebVTT/ASS format helpers plus FFmpeg subprocess with timeout and bounded stderr
+- **Location**: `app/services/caption_formats.py`, `app/services/caption_finishing.py`
+
 ### Poster Generator
-- **Purpose**: Extracts a frame from rendered video as a JPEG poster
-- **Tech**: FFmpeg subprocess
+- **Purpose**: Extracts a request-selected frame from rendered video as a JPEG poster
+- **Tech**: FFmpeg subprocess with default, timestamp, percent, and disabled modes
 - **Location**: `app/renderers/poster.py`
 
 ### Webhook Service
@@ -199,12 +205,13 @@ Local Filesystem (render artifacts)
 14. Compiled Editly JSON + replay metadata written to workspace
 15. Editly invoked as Node subprocess with timeout; progress parsed from FFmpeg stderr
 16. Detached audio clips mixed via FFmpeg post-processing when needed
-17. Output postprocessor keeps MP4 or converts the MP4 intermediate to WebM, GIF, or a PNG sequence zip and manifest
-18. Poster extracted from the MP4 intermediate via FFmpeg
-19. Artifacts and output metadata persisted to storage and database
-20. Render status updated to `succeeded` or `failed`
-21. Webhook delivery is queued for terminal states when configured
-22. Client polls GET `/v1/renders/{id}` for status, progress, output metadata, and download URL
+17. Caption finisher writes sidecars or burns captions into the MP4 intermediate when requested
+18. Output postprocessor keeps MP4 or converts the selected intermediate to WebM, GIF, or a PNG sequence zip and manifest
+19. Poster extraction uses request-level default, timestamp, percent, or disabled behavior
+20. Artifacts and caption, output, and poster metadata persist to storage and database
+21. Render status updated to `succeeded` or `failed`
+22. Webhook delivery is queued for terminal states when configured
+23. Client polls GET `/v1/renders/{id}` for status, progress, artifact metadata, and download URLs
 
 ### Cancellation Flow
 
@@ -250,6 +257,7 @@ Same pipeline stages run synchronously within the API request when `RENDER_MODE=
 | Cooperative cancellation via DB flag | Not ARQ abort | Renderer-agnostic, easier to test |
 | Two-pass audio mixing | FFmpeg post-process | Editly audioTracks lacks per-track timing; -c:v copy avoids re-encoding |
 | MP4 intermediate for non-MP4 outputs | FFmpeg finishing step | Keeps Editly as the default renderer while enabling WebM, GIF, and PNG sequence artifacts |
+| Caption finishing before output conversion | Shared intermediate step | Burned captions propagate to all requested output formats without renderer-specific public schemas |
 | Workspace isolation per job | Separate WorkspaceManager | Single responsibility, concurrent safety |
 | Xvfb in worker container | Virtual framebuffer | Editly's gl module needs an OpenGL context |
 | Template renders pin version at submission | Stored active version pointer | Reproducible template renders and stable audit trail |

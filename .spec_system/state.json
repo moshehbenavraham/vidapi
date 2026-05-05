@@ -3,7 +3,7 @@
   "project_name": "VidAPI",
   "description": "Self-hosted Python FastAPI service that replicates Creatomate/JSON2Video behavior - accepts JSON timeline compositions and renders video via FFmpeg",
   "current_phase": 4,
-  "current_session": null,
+  "current_session": "phase04-session03-captions-and-poster-customization",
   "monorepo": false,
   "phases": {
     "0": {
@@ -376,6 +376,11 @@
       "date": "2026-05-05",
       "session": "phase04-session02-output-formats-and-presets",
       "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase04-session03-captions-and-poster-customization",
+      "status": "planned"
     }
   ]
 }
