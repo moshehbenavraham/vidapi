@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: Run release checks
+        run: uv run pytest tests/test_health.py tests/test_ops_api.py
+
+      - name: Build API image
+        run: docker build -f Dockerfile.api -t vidapi-api:${{ github.ref_name }} .
+
+      - name: Build worker image
+        run: docker build -f Dockerfile.worker -t vidapi-worker:${{ github.ref_name }} .
+
+      - name: TODO - wire deployment target
+        run: |
+          echo "TODO: connect a production deployment target for tagged releases."
+          echo "This workflow currently validates build artifacts only."
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

@@ -1,0 +1,55 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy placeholder and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: TODO - wire deployment target
+        run: |
+          echo "TODO: connect a real deployment target for this repository."
+          echo "Running production-like validation locally until a target exists."
+
+      - name: Start production-like stack
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build
+
+      - name: Run smoke test
+        run: bash scripts/smoke-test.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml logs --no-color
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml down -v
