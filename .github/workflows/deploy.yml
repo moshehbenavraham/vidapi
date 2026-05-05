@@ -84,8 +84,28 @@ jobs:
           MINIO_ROOT_PASSWORD=change-me-minio
           EOF
 
-      - name: Start production-like core services
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build api postgres redis minio
+      - name: Start production-like infrastructure
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build postgres redis minio
+
+      - name: Wait for PostgreSQL
+        run: |
+          set -euo pipefail
+
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if docker compose --env-file .env.production.example -f docker-compose.prod.yml exec -T postgres pg_isready -U vidapi -d vidapi; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "PostgreSQL did not become ready within 60 seconds" >&2
+          exit 1
+
+      - name: Run database migrations
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml run --rm api alembic upgrade head
+
+      - name: Start API service
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d api
 
       - name: Run lightweight smoke test
         run: |
