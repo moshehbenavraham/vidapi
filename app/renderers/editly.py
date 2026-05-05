@@ -20,8 +20,11 @@ from app.models.composition import (
     Composition,
     FitMode,
     ImageAsset,
+    NamedPosition,
     TextAsset,
     Track,
+    Transition,
+    TransitionType,
     VideoAsset,
 )
 from app.renderers.base import (
@@ -30,6 +33,7 @@ from app.renderers.base import (
     RenderArtifact,
     RenderError,
 )
+from app.renderers.position import resolve_position
 from app.services.audio_mixer import AudioMixError, AudioMixPlan, AudioSource, mix_audio
 
 logger = structlog.get_logger(__name__)
@@ -181,7 +185,68 @@ def _fit_mode_to_resize(fit: FitMode) -> str | None:
     return mapping.get(fit)
 
 
-def map_video_layer(clip: Clip, active_clip: ActiveClip) -> dict[str, Any]:
+def _has_custom_position(clip: Clip) -> bool:
+    return clip.position != NamedPosition.CENTER or clip.offset is not None
+
+
+def _apply_position_to_video_layer(
+    layer: dict[str, Any],
+    clip: Clip,
+    *,
+    output_width: int,
+    output_height: int,
+) -> None:
+    if not _has_custom_position(clip):
+        return
+
+    position = resolve_position(
+        clip.position,
+        clip.offset,
+        output_width=output_width,
+        output_height=output_height,
+    )
+    layer["left"] = position["x"]
+    layer["top"] = position["y"]
+    layer["originX"] = position["originX"]
+    layer["originY"] = position["originY"]
+
+
+def _apply_position_to_overlay_layer(
+    layer: dict[str, Any],
+    clip: Clip,
+    *,
+    output_width: int,
+    output_height: int,
+) -> None:
+    if not _has_custom_position(clip):
+        return
+
+    layer["position"] = resolve_position(
+        clip.position,
+        clip.offset,
+        output_width=output_width,
+        output_height=output_height,
+    )
+
+
+def _apply_opacity(layer: dict[str, Any], clip: Clip) -> None:
+    if clip.opacity < 1.0 - EPSILON:
+        layer["opacity"] = clip.opacity
+
+
+def _apply_scale(layer: dict[str, Any], clip: Clip) -> None:
+    if abs(clip.scale - 1.0) > EPSILON:
+        layer["width"] = clip.scale
+        layer["height"] = clip.scale
+
+
+def map_video_layer(
+    clip: Clip,
+    active_clip: ActiveClip,
+    *,
+    output_width: int = 1920,
+    output_height: int = 1080,
+) -> dict[str, Any]:
     """Map a video asset clip to an Editly layer."""
     asset: VideoAsset = clip.asset  # type: ignore[assignment]
     layer: dict[str, Any] = {
@@ -205,10 +270,24 @@ def map_video_layer(clip: Clip, active_clip: ActiveClip) -> dict[str, Any]:
     if asset.volume < 1.0 - EPSILON:
         layer["mixVolume"] = asset.volume
 
+    _apply_position_to_video_layer(
+        layer,
+        clip,
+        output_width=output_width,
+        output_height=output_height,
+    )
+    _apply_opacity(layer, clip)
+    _apply_scale(layer, clip)
+
     return layer
 
 
-def map_image_layer(clip: Clip) -> dict[str, Any]:
+def map_image_layer(
+    clip: Clip,
+    *,
+    output_width: int = 1920,
+    output_height: int = 1080,
+) -> dict[str, Any]:
     """Map an image asset clip to an Editly image-overlay layer."""
     asset: ImageAsset = clip.asset  # type: ignore[assignment]
     layer: dict[str, Any] = {
@@ -220,10 +299,24 @@ def map_image_layer(clip: Clip) -> dict[str, Any]:
     if resize_mode is not None:
         layer["resizeMode"] = resize_mode
 
+    _apply_position_to_overlay_layer(
+        layer,
+        clip,
+        output_width=output_width,
+        output_height=output_height,
+    )
+    _apply_opacity(layer, clip)
+    _apply_scale(layer, clip)
+
     return layer
 
 
-def map_text_png_layer(clip: Clip) -> dict[str, Any]:
+def map_text_png_layer(
+    clip: Clip,
+    *,
+    output_width: int = 1920,
+    output_height: int = 1080,
+) -> dict[str, Any]:
     """Map a text asset (pre-rendered to PNG) to an Editly image-overlay layer.
 
     The text_renderer from Session 03 produces a PNG path that we reference here.
@@ -233,6 +326,14 @@ def map_text_png_layer(clip: Clip) -> dict[str, Any]:
         "type": "image-overlay",
         "path": "",
     }
+    _apply_position_to_overlay_layer(
+        layer,
+        clip,
+        output_width=output_width,
+        output_height=output_height,
+    )
+    _apply_opacity(layer, clip)
+    _apply_scale(layer, clip)
     return layer
 
 
@@ -243,19 +344,39 @@ def map_color_layer(clip: Clip) -> dict[str, Any]:
         "type": "fill-color",
         "color": asset.color,
     }
+    _apply_opacity(layer, clip)
     return layer
 
 
-def map_clip_to_layer(clip: Clip, active_clip: ActiveClip) -> dict[str, Any] | None:
+def map_clip_to_layer(
+    clip: Clip,
+    active_clip: ActiveClip,
+    *,
+    output_width: int = 1920,
+    output_height: int = 1080,
+) -> dict[str, Any] | None:
     """Route a clip to the appropriate layer mapper based on asset type."""
     asset = clip.asset
 
     if isinstance(asset, VideoAsset):
-        return map_video_layer(clip, active_clip)
+        return map_video_layer(
+            clip,
+            active_clip,
+            output_width=output_width,
+            output_height=output_height,
+        )
     elif isinstance(asset, ImageAsset):
-        return map_image_layer(clip)
+        return map_image_layer(
+            clip,
+            output_width=output_width,
+            output_height=output_height,
+        )
     elif isinstance(asset, TextAsset):
-        return map_text_png_layer(clip)
+        return map_text_png_layer(
+            clip,
+            output_width=output_width,
+            output_height=output_height,
+        )
     elif isinstance(asset, ColorAsset):
         return map_color_layer(clip)
     elif isinstance(asset, AudioAsset):
@@ -369,6 +490,65 @@ def map_soundtrack(soundtrack: AudioAsset | None) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _map_transition_to_editly(transition: Transition) -> dict[str, Any]:
+    return {
+        "name": "fade",
+        "duration": round(transition.duration, 6),
+    }
+
+
+def _find_transition_at_boundary(
+    segment: Segment,
+    next_segment: Segment | None,
+) -> Transition | None:
+    boundary = segment.end
+    candidates: list[tuple[int, int, Transition]] = []
+
+    if next_segment is not None:
+        for active_clip in segment.active_clips:
+            clip = active_clip.clip
+            if (
+                clip.transition is None
+                or clip.transition.name != TransitionType.CROSSFADE
+            ):
+                continue
+            if abs((clip.start + clip.length) - boundary) >= EPSILON:
+                continue
+
+            has_sequential_clip = any(
+                next_active_clip.track_index == active_clip.track_index
+                and next_active_clip.clip is not clip
+                and abs(next_active_clip.clip.start - boundary) < EPSILON
+                for next_active_clip in next_segment.active_clips
+            )
+            if has_sequential_clip:
+                candidates.append((2, active_clip.track_index, clip.transition))
+
+    for active_clip in segment.active_clips:
+        clip = active_clip.clip
+        if clip.transition is None or clip.transition.name != TransitionType.FADE_OUT:
+            continue
+        if abs((clip.start + clip.length) - boundary) < EPSILON:
+            candidates.append((1, active_clip.track_index, clip.transition))
+
+    if next_segment is not None:
+        for active_clip in next_segment.active_clips:
+            clip = active_clip.clip
+            if (
+                clip.transition is None
+                or clip.transition.name != TransitionType.FADE_IN
+            ):
+                continue
+            if abs(clip.start - boundary) < EPSILON:
+                candidates.append((0, active_clip.track_index, clip.transition))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
+    return candidates[0][2]
+
+
 def assemble_editly_spec(
     segments: list[Segment],
     composition: Composition,
@@ -383,45 +563,51 @@ def assemble_editly_spec(
     audioTracks to avoid double-mixing with the FFmpeg post-processing step.
     """
     clips: list[dict[str, Any]] = []
+    output_width = composition.output.width or 1920
+    output_height = composition.output.height or 1080
 
-    for segment in segments:
+    for index, segment in enumerate(segments):
+        next_segment = segments[index + 1] if index + 1 < len(segments) else None
+
         if not segment.active_clips:
-            clips.append(
-                {
-                    "duration": round(segment.duration, 6),
-                    "layers": [
-                        {"type": "fill-color", "color": composition.timeline.background}
-                    ],
-                }
-            )
-            continue
+            layers: list[dict[str, Any]] = [
+                {"type": "fill-color", "color": composition.timeline.background}
+            ]
+        else:
+            layers = []
+            for active_clip in segment.active_clips:
+                layer = map_clip_to_layer(
+                    active_clip.clip,
+                    active_clip,
+                    output_width=output_width,
+                    output_height=output_height,
+                )
+                if layer is None:
+                    continue
 
-        layers: list[dict[str, Any]] = []
-        for active_clip in segment.active_clips:
-            layer = map_clip_to_layer(active_clip.clip, active_clip)
-            if layer is None:
-                continue
+                if asset_path_resolver and "path" in layer and layer["path"]:
+                    resolved = asset_path_resolver.get(layer["path"])
+                    if resolved:
+                        layer["path"] = resolved
 
-            if asset_path_resolver and "path" in layer and layer["path"]:
-                resolved = asset_path_resolver.get(layer["path"])
-                if resolved:
-                    layer["path"] = resolved
-
-            layers.append(layer)
+                layers.append(layer)
 
         if not layers:
             layers = [{"type": "fill-color", "color": composition.timeline.background}]
 
-        clips.append(
-            {
-                "duration": round(segment.duration, 6),
-                "layers": layers,
-            }
-        )
+        clip_spec: dict[str, Any] = {
+            "duration": round(segment.duration, 6),
+            "layers": layers,
+        }
+        transition = _find_transition_at_boundary(segment, next_segment)
+        if transition is not None:
+            clip_spec["transition"] = _map_transition_to_editly(transition)
+
+        clips.append(clip_spec)
 
     spec: dict[str, Any] = {
-        "width": composition.output.width,
-        "height": composition.output.height,
+        "width": output_width,
+        "height": output_height,
         "fps": composition.output.fps,
         "outPath": output_path,
         "clips": clips,

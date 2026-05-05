@@ -20,6 +20,8 @@ from app.models.composition import (
     Track,
     Transform,
     Transition,
+    TransitionPlacement,
+    TransitionType,
     VideoAsset,
 )
 from app.models.render import (
@@ -55,5 +57,7 @@ __all__ = [
     "Track",
     "Transform",
     "Transition",
+    "TransitionPlacement",
+    "TransitionType",
     "VideoAsset",
 ]

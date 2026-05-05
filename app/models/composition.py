@@ -70,6 +70,25 @@ class AudioEffect(StrEnum):
     FADE_IN_FADE_OUT = "fadeInFadeOut"
 
 
+class TransitionType(StrEnum):
+    FADE_IN = "fade_in"
+    FADE_OUT = "fade_out"
+    CROSSFADE = "crossfade"
+
+
+class TransitionPlacement(StrEnum):
+    IN = "in"
+    OUT = "out"
+    BETWEEN = "between"
+
+
+TRANSITION_PLACEMENTS: dict[TransitionType, TransitionPlacement] = {
+    TransitionType.FADE_IN: TransitionPlacement.IN,
+    TransitionType.FADE_OUT: TransitionPlacement.OUT,
+    TransitionType.CROSSFADE: TransitionPlacement.BETWEEN,
+}
+
+
 # ---------------------------------------------------------------------------
 # Resolution preset lookup
 # ---------------------------------------------------------------------------
@@ -153,8 +172,33 @@ class Offset(BaseModel):
 class Transition(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    name: str = "fade"
+    name: TransitionType = TransitionType.FADE_IN
     duration: float = Field(default=1.0, gt=0.0)
+    placement: TransitionPlacement | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _parse_transition_type(cls, v: object) -> object:
+        if isinstance(v, str):
+            aliases = {
+                "fadeIn": TransitionType.FADE_IN,
+                "fade-in": TransitionType.FADE_IN,
+                "fadeOut": TransitionType.FADE_OUT,
+                "fade-out": TransitionType.FADE_OUT,
+            }
+            return aliases.get(v, v)
+        return v
+
+    @model_validator(mode="after")
+    def _validate_placement(self) -> Transition:
+        expected = TRANSITION_PLACEMENTS[self.name]
+        if self.placement is None:
+            object.__setattr__(self, "placement", expected)
+            return self
+        if self.placement != expected:
+            msg = f"Transition {self.name.value} must use placement {expected.value}"
+            raise ValueError(msg)
+        return self
 
 
 class Transform(BaseModel):
@@ -250,6 +294,15 @@ class Clip(BaseModel):
         if isinstance(v, str):
             return NamedPosition(v)
         return v
+
+    @model_validator(mode="after")
+    def _validate_transition_duration(self) -> Clip:
+        if self.transition is None:
+            return self
+        if self.transition.duration > self.length:
+            msg = "Transition duration must be less than or equal to clip length"
+            raise ValueError(msg)
+        return self
 
 
 # ---------------------------------------------------------------------------

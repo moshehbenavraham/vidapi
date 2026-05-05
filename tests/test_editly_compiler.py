@@ -302,6 +302,123 @@ class TestAssembleEditlySpec:
         assert gap_clip["layers"][0]["type"] == "fill-color"
         assert gap_clip["layers"][0]["color"] == "#333333"
 
+    def test_positioned_layers_produce_editly_json(self):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=ImageAsset(type="image", src="/overlay.png"),
+                                start=0.0,
+                                length=3.0,
+                                position={"x": 0.25, "y": 0.75},
+                                offset={"x": 128.0, "y": -72.0},
+                                opacity=0.5,
+                                scale=0.4,
+                            ),
+                        ]
+                    ),
+                ],
+            ),
+            output=Output(width=1280, height=720, fps=30),
+        )
+        tracks = comp.timeline.tracks
+        total_dur = compute_total_duration(tracks)
+        boundaries = collect_boundaries(tracks, total_dur)
+        segments = generate_segments(boundaries, tracks)
+
+        spec = assemble_editly_spec(segments, comp, "/out.mp4")
+
+        layer = spec["clips"][0]["layers"][0]
+        assert layer["position"] == {
+            "x": 0.35,
+            "y": 0.65,
+            "originX": "left",
+            "originY": "top",
+        }
+        assert layer["opacity"] == 0.5
+        assert layer["width"] == 0.4
+        assert layer["height"] == 0.4
+
+    def test_transition_on_clip_produces_valid_spec(self):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=VideoAsset(type="video", src="/v.mp4"),
+                                start=0.0,
+                                length=3.0,
+                                transition={"name": "fade_out", "duration": 0.5},
+                            ),
+                        ]
+                    ),
+                ],
+            ),
+            output=Output(width=1280, height=720, fps=30),
+        )
+        tracks = comp.timeline.tracks
+        total_dur = compute_total_duration(tracks)
+        boundaries = collect_boundaries(tracks, total_dur)
+        segments = generate_segments(boundaries, tracks)
+
+        spec = assemble_editly_spec(segments, comp, "/out.mp4")
+
+        assert spec["clips"][0]["transition"] == {"name": "fade", "duration": 0.5}
+
+    def test_crossfade_between_sequential_clips(self):
+        comp = Composition(
+            timeline=Timeline(
+                tracks=[
+                    Track(
+                        clips=[
+                            Clip(
+                                asset=VideoAsset(type="video", src="/a.mp4"),
+                                start=0.0,
+                                length=2.0,
+                                transition={"name": "crossfade", "duration": 0.25},
+                            ),
+                            Clip(
+                                asset=VideoAsset(type="video", src="/b.mp4"),
+                                start=2.0,
+                                length=2.0,
+                            ),
+                        ]
+                    ),
+                ],
+            ),
+            output=Output(width=1280, height=720, fps=30),
+        )
+        tracks = comp.timeline.tracks
+        total_dur = compute_total_duration(tracks)
+        boundaries = collect_boundaries(tracks, total_dur)
+        segments = generate_segments(boundaries, tracks)
+
+        spec = assemble_editly_spec(segments, comp, "/out.mp4")
+
+        assert len(spec["clips"]) == 2
+        assert spec["clips"][0]["transition"] == {"name": "fade", "duration": 0.25}
+
+    def test_fixture_defaults_omit_new_visual_and_transition_keys(self):
+        fixture_path = Path("tests/fixtures/sample_composition.json")
+        comp = Composition.model_validate_json(fixture_path.read_text())
+        tracks = comp.timeline.tracks
+        total_dur = compute_total_duration(tracks)
+        boundaries = collect_boundaries(tracks, total_dur)
+        segments = generate_segments(boundaries, tracks)
+
+        spec = assemble_editly_spec(segments, comp, "/out.mp4")
+
+        for clip_spec in spec["clips"]:
+            assert "transition" not in clip_spec
+            for layer in clip_spec["layers"]:
+                assert "position" not in layer
+                assert "opacity" not in layer
+                assert "width" not in layer
+                assert "height" not in layer
+
 
 @pytest.mark.asyncio
 class TestEditlyRendererCompile:
