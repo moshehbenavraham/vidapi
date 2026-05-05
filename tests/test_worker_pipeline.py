@@ -16,6 +16,7 @@ from app.models.error_codes import ErrorCode
 from app.models.render import RenderStatus
 from app.renderers.base import CompiledRender
 from app.services.render_service import RenderService, RenderServiceError
+from app.storage.base import ArtifactType
 from app.workers.render_worker import run_render
 from app.workers.workspace import WorkspaceManager
 
@@ -92,9 +93,23 @@ def mock_service(tmp_path: Path) -> RenderService:
     async def _stage_render(composition, compiled, render_id, ws, session, **kwargs):
         pass
 
+    async def _read_artifact_uri(uri):
+        return Path(uri).read_bytes()
+
+    async def _publish_artifact_file(render_id, artifact_type, source_path, session):
+        if artifact_type is ArtifactType.LOG:
+            await render_crud.update_render_paths(
+                session,
+                render_id,
+                log_path=str(source_path),
+            )
+        return str(source_path)
+
+    service.read_artifact_uri = AsyncMock(side_effect=_read_artifact_uri)
     service.stage_validate_and_expand = AsyncMock(side_effect=_stage_validate)
     service.stage_resolve_and_compile = AsyncMock(side_effect=_stage_compile)
     service.stage_render_and_store = AsyncMock(side_effect=_stage_render)
+    service.publish_artifact_file = AsyncMock(side_effect=_publish_artifact_file)
     return service
 
 
@@ -181,6 +196,45 @@ class TestPipelineTransitions:
             render = await render_crud.get_render_by_id(session, render_id)
             assert render is not None
             assert render.started_at is not None
+
+    @pytest.mark.asyncio
+    async def test_preflight_reads_input_through_storage_uri(
+        self,
+        pipeline_db_engine,
+        pipeline_session_factory,
+        pipeline_workspace,
+        mock_service,
+        sample_composition_dict,
+    ):
+        """Worker reads stored composition through render service storage."""
+        async with pipeline_session_factory() as session:
+            render = await render_crud.create_render(session)
+            render_id = render.id
+            await render_crud.update_render_paths(
+                session,
+                render_id,
+                input_path="s3://vidapi-renders/renders/render_abc/input.json",
+            )
+
+        mock_service.read_artifact_uri = AsyncMock(
+            return_value=json.dumps(sample_composition_dict).encode("utf-8")
+        )
+
+        ctx = {
+            "session_factory": pipeline_session_factory,
+            "render_service": mock_service,
+            "workspace_manager": pipeline_workspace,
+        }
+
+        await run_render(ctx, render_id)
+
+        mock_service.read_artifact_uri.assert_awaited_once_with(
+            "s3://vidapi-renders/renders/render_abc/input.json"
+        )
+        async with pipeline_session_factory() as session:
+            render = await render_crud.get_render_by_id(session, render_id)
+            assert render is not None
+            assert render.status == RenderStatus.SUCCEEDED.value
 
 
 # ---------------------------------------------------------------------------

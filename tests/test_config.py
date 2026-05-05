@@ -26,6 +26,8 @@ def test_database_url_default() -> None:
 def test_storage_root_default() -> None:
     settings = Settings()
     assert settings.storage_root == Path("data")
+    assert settings.storage_backend == "local"
+    assert settings.storage_url_mode == "proxy"
 
 
 def test_env_var_override() -> None:
@@ -58,3 +60,44 @@ def test_numeric_settings_override() -> None:
 def test_render_timeout_default() -> None:
     settings = Settings()
     assert settings.render_timeout_seconds == 600
+
+
+def test_s3_backend_requires_bucket() -> None:
+    with pytest.raises(ValueError, match="S3_BUCKET"):
+        Settings(storage_backend="s3")
+
+
+def test_s3_backend_accepts_bucket_without_local_credentials() -> None:
+    settings = Settings(storage_backend="s3", s3_bucket="vidapi-renders")
+    assert settings.storage_backend == "s3"
+    assert settings.s3_bucket == "vidapi-renders"
+
+
+def test_s3_public_mode_requires_public_base_url() -> None:
+    with pytest.raises(ValueError, match="S3_PUBLIC_BASE_URL"):
+        Settings(
+            storage_backend="s3",
+            s3_bucket="vidapi-renders",
+            storage_url_mode="public",
+        )
+
+
+def test_public_base_url_rejects_embedded_credentials() -> None:
+    with pytest.raises(ValueError, match="embedded credentials"):
+        Settings(
+            storage_backend="s3",
+            s3_bucket="vidapi-renders",
+            storage_url_mode="public",
+            s3_public_base_url="https://user:pass@example.com/renders",
+        )
+
+
+def test_production_s3_backend_requires_credentials() -> None:
+    with pytest.raises(ValueError, match="S3_ACCESS_KEY_ID"):
+        Settings(
+            environment="production",
+            database_url="postgresql+asyncpg://user:pass@localhost/vidapi",
+            database_auto_create=False,
+            storage_backend="s3",
+            s3_bucket="vidapi-renders",
+        )

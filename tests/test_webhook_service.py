@@ -17,11 +17,24 @@ from app.db.models import Render
 from app.db.webhook_models import WebhookAttempt  # noqa: F401 - registers table
 from app.services.webhook_service import (
     build_headers,
+    build_storage_aware_webhook_payload,
     build_webhook_payload,
     deliver_with_retries,
     dispatch_webhook,
     sign_payload,
 )
+
+
+class FakeWebhookUrlResolver:
+    async def output_url(self, render: Render) -> str | None:
+        if render.output_path:
+            return "https://cdn.example.com/output.mp4"
+        return None
+
+    async def poster_url(self, render: Render) -> str | None:
+        if render.poster_path:
+            return "https://cdn.example.com/poster.jpg"
+        return None
 
 
 def _make_render(**overrides) -> Render:
@@ -75,6 +88,19 @@ class TestBuildWebhookPayload:
         payload = build_webhook_payload(event="render.succeeded", render=render)
 
         assert payload["completed_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_storage_aware_payload_uses_resolved_urls(self) -> None:
+        render = _make_render()
+
+        payload = await build_storage_aware_webhook_payload(
+            event="render.succeeded",
+            render=render,
+            url_resolver=FakeWebhookUrlResolver(),  # type: ignore[arg-type]
+        )
+
+        assert payload["url"] == "https://cdn.example.com/output.mp4"
+        assert payload["poster"] == "https://cdn.example.com/poster.jpg"
 
 
 # ---- T015: HMAC signing tests ----

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import structlog
 from arq.connections import ArqRedis
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from app.api.deps import ArqPoolDep, DBSessionDep, RenderServiceDep, SettingsDep
+from app.api.deps import (
+    ArqPoolDep,
+    DBSessionDep,
+    RenderServiceDep,
+    SettingsDep,
+    StorageDep,
+    StorageUrlResolverDep,
+)
+from app.api.errors import StorageError
 from app.db import render_crud
 from app.models.composition import Composition
 from app.models.errors import (
@@ -28,6 +34,7 @@ from app.models.render import (
 from app.models.render import (
     RenderError as RenderErrorModel,
 )
+from app.storage.base import ArtifactType, artifact_media_type
 from app.workers.render_worker import enqueue_render
 
 logger = structlog.get_logger(__name__)
@@ -51,6 +58,7 @@ async def create_render(
     session: DBSessionDep,
     settings: SettingsDep,
     arq_pool: ArqPoolDep,
+    storage: StorageDep,
 ) -> CreateRenderResponse:
     """Accept a composition and start rendering.
 
@@ -64,7 +72,7 @@ async def create_render(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Render queue pool not initialized.",
             )
-        return await _create_render_async(composition, session, arq_pool)
+        return await _create_render_async(composition, session, arq_pool, storage)
     return await _create_render_sync(composition, render_service, session)
 
 
@@ -72,21 +80,37 @@ async def _create_render_async(
     composition: Composition,
     session: DBSessionDep,
     arq_pool: ArqRedis,
+    storage: StorageDep,
 ) -> CreateRenderResponse:
     """Async path: create record, persist input, enqueue job."""
     callback_url = str(composition.callback) if composition.callback else None
     render = await render_crud.create_render(session, callback_url=callback_url)
     render_id = render.id
 
-    from app.api.deps import get_local_storage
-
-    storage = get_local_storage()
-    workspace = await storage.create_workspace(render_id)
-    input_path = workspace / "input.json"
-    input_path.write_text(composition.model_dump_json(indent=2), encoding="utf-8")
-    await render_crud.update_render_paths(
-        session, render_id, input_path=str(input_path)
-    )
+    try:
+        input_uri = await storage.publish_bytes(
+            render_id,
+            ArtifactType.INPUT,
+            composition.model_dump_json(indent=2).encode("utf-8"),
+        )
+        await render_crud.update_render_paths(
+            session,
+            render_id,
+            input_path=input_uri,
+        )
+    except (OSError, StorageError) as exc:
+        await render_crud.update_render_status(
+            session,
+            render_id,
+            RenderStatus.FAILED,
+            error_code="STORAGE_ERROR",
+            error_message="Failed to persist render input",
+            stage="failed",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist render input.",
+        ) from exc
 
     try:
         await enqueue_render(arq_pool, render_id)
@@ -259,6 +283,7 @@ async def cancel_render(
 async def get_render(
     render_id: str,
     session: DBSessionDep,
+    url_resolver: StorageUrlResolverDep,
 ) -> RenderResponse:
     """Return full render status."""
     render = await render_crud.get_render_by_id(session, render_id)
@@ -277,13 +302,8 @@ async def get_render(
             message=render.error_message or "Unknown error",
         )
 
-    url: str | None = None
-    if render_status == RenderStatus.SUCCEEDED and render.output_path:
-        url = f"/v1/renders/{render.id}/download"
-
-    poster: str | None = None
-    if render.poster_path:
-        poster = f"/v1/renders/{render.id}/poster"
+    url = await url_resolver.output_url(render)
+    poster = await url_resolver.poster_url(render)
 
     return RenderResponse(
         id=render.id,
@@ -311,7 +331,9 @@ async def get_render(
 async def download_render(
     render_id: str,
     session: DBSessionDep,
-) -> FileResponse:
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+) -> Response:
     """Stream the rendered output file."""
     render = await render_crud.get_render_by_id(session, render_id)
     if render is None:
@@ -335,15 +357,95 @@ async def download_render(
             detail=f"No output file for render {render_id}",
         )
 
-    output_path = Path(render.output_path)
-    if not output_path.is_file():
+    return await _artifact_response(
+        render_id=render_id,
+        artifact_uri=render.output_path,
+        artifact_type=ArtifactType.OUTPUT,
+        storage=storage,
+        url_resolver=url_resolver,
+        filename=f"{render_id}.mp4",
+        disposition="attachment",
+    )
+
+
+@router.get(
+    "/renders/{render_id}/poster",
+    responses={
+        404: NOT_FOUND_ERROR,
+        422: VALIDATION_ERROR,
+    },
+)
+async def download_poster(
+    render_id: str,
+    session: DBSessionDep,
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+) -> Response:
+    """Stream or redirect the render poster artifact."""
+    render = await render_crud.get_render_by_id(session, render_id)
+    if render is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Output file missing for render {render_id}",
+            detail=f"Render {render_id} not found",
         )
 
-    return FileResponse(
-        path=output_path,
-        media_type="video/mp4",
-        filename=f"{render_id}.mp4",
+    if not render.poster_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No poster file for render {render_id}",
+        )
+
+    return await _artifact_response(
+        render_id=render_id,
+        artifact_uri=render.poster_path,
+        artifact_type=ArtifactType.POSTER,
+        storage=storage,
+        url_resolver=url_resolver,
+        filename=f"{render_id}.jpg",
+        disposition="inline",
+    )
+
+
+async def _artifact_response(
+    *,
+    render_id: str,
+    artifact_uri: str,
+    artifact_type: ArtifactType,
+    storage: StorageDep,
+    url_resolver: StorageUrlResolverDep,
+    filename: str,
+    disposition: str,
+) -> Response:
+    redirect_url = await url_resolver.endpoint_redirect_url(
+        render_id,
+        artifact_uri,
+        artifact_type,
+    )
+    if redirect_url is not None:
+        return RedirectResponse(
+            redirect_url,
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
+
+    try:
+        exists = await storage.exists_uri(artifact_uri)
+    except StorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Artifact storage is unavailable.",
+        ) from exc
+
+    if not exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact missing for render {render_id}",
+        )
+
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{filename}"',
+    }
+    return StreamingResponse(
+        storage.iter_uri(artifact_uri),
+        media_type=artifact_media_type(artifact_type),
+        headers=headers,
     )

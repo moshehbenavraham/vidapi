@@ -63,6 +63,46 @@ Reset a disposable local database with:
 alembic downgrade base && alembic upgrade head
 ```
 
+## Render Artifact Storage
+
+Local artifact storage is the default and needs no external service:
+
+```bash
+STORAGE_BACKEND=local
+STORAGE_URL_MODE=proxy
+uvicorn app.main:app --reload
+```
+
+Renderers still use `RENDER_WORKSPACE_ROOT` as local scratch space. Durable
+local artifacts are published under `STORAGE_ROOT/artifacts`, so async worker
+cleanup does not remove completed downloads.
+
+Optional MinIO smoke setup:
+
+```bash
+docker run --rm \
+  -p 9000:9000 -p 9001:9001 \
+  -e MINIO_ROOT_USER=vidapi \
+  -e MINIO_ROOT_PASSWORD=vidapi-secret \
+  quay.io/minio/minio server /data --console-address ":9001"
+```
+
+Create a `vidapi-renders` bucket in the MinIO console, then run API and worker
+processes with matching settings:
+
+```bash
+STORAGE_BACKEND=s3
+STORAGE_URL_MODE=proxy
+S3_BUCKET=vidapi-renders
+S3_ENDPOINT_URL=http://localhost:9000
+S3_ACCESS_KEY_ID=vidapi
+S3_SECRET_ACCESS_KEY=vidapi-secret
+S3_FORCE_PATH_STYLE=true
+```
+
+Tests use mocks for S3 behavior by default; MinIO is only for manual smoke
+checks.
+
 ## Testing
 
 ```bash
@@ -101,6 +141,21 @@ pre-commit install
 | `DATABASE_CONNECT_RETRY_BACKOFF_SECONDS` | `0.5` | Initial startup database retry backoff |
 | `ENVIRONMENT` | `development` | `development`, `test`, or `production` startup guard |
 | `STORAGE_ROOT` | `./data` | Root directory for render artifacts |
+| `RENDER_WORKSPACE_ROOT` | `data/renders` | Local scratch workspace root for render jobs |
+| `STORAGE_BACKEND` | `local` | Artifact backend: `local` or `s3` |
+| `STORAGE_URL_MODE` | `proxy` | Artifact URL mode: `proxy`, `signed`, or `public` |
+| `STORAGE_SIGNED_URL_EXPIRY_SECONDS` | `900` | Signed S3 URL lifetime |
+| `S3_BUCKET` | `unset` | S3-compatible artifact bucket |
+| `S3_ENDPOINT_URL` | `unset` | Optional S3-compatible endpoint, such as MinIO or R2 |
+| `S3_REGION` | `us-east-1` | S3 region |
+| `S3_ACCESS_KEY_ID` | `unset` | S3 access key |
+| `S3_SECRET_ACCESS_KEY` | `unset` | S3 secret key |
+| `S3_OBJECT_PREFIX` | `renders` | Prefix for render-scoped object keys |
+| `S3_FORCE_PATH_STYLE` | `true` | Use path-style S3 addressing for compatible endpoints |
+| `S3_PUBLIC_BASE_URL` | `unset` | Public object base URL required for S3 public mode |
+| `S3_CONNECT_TIMEOUT_SECONDS` | `5` | S3 connection timeout |
+| `S3_READ_TIMEOUT_SECONDS` | `60` | S3 read timeout |
+| `S3_MAX_ATTEMPTS` | `3` | S3 retry attempts |
 | `DEBUG` | `false` | Enable debug logging |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 | `RENDER_MODE` | `sync` | `sync` (no Redis) or `async` (Redis + ARQ worker) |

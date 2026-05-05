@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.api.errors import StorageError
-from app.storage.base import ArtifactType
+from app.storage.base import ArtifactType, StorageBackend
 from app.storage.local import LocalStorage
 
 
@@ -30,6 +30,7 @@ class TestWorkspaceLifecycle:
         assert ws.exists()
         assert ws.is_dir()
         assert ws == (tmp_path / RENDER_ID).resolve()
+        assert storage.backend == StorageBackend.LOCAL
 
     @pytest.mark.asyncio
     async def test_create_workspace_idempotent(
@@ -157,7 +158,7 @@ class TestArtifactList:
         artifacts = await storage.list_artifacts(RENDER_ID)
         names = {a.name for a in artifacts}
         assert "input.json" in names
-        assert "render.log" in names
+        assert "logs.txt" in names
 
     @pytest.mark.asyncio
     async def test_list_artifacts_nonexistent_workspace(
@@ -188,3 +189,76 @@ class TestDeterministicPaths:
         p1 = await storage.workspace_path("render_abc")
         p2 = await storage.workspace_path("render_xyz")
         assert p1 != p2
+
+
+class TestDurableLocalArtifacts:
+    @pytest.mark.asyncio
+    async def test_publish_bytes_writes_to_artifact_root(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        storage = LocalStorage(
+            workspace_root=tmp_path / "scratch",
+            artifact_root=tmp_path / "artifacts",
+        )
+
+        uri = await storage.publish_bytes(
+            RENDER_ID,
+            ArtifactType.INPUT,
+            b'{"ok": true}',
+        )
+
+        assert Path(uri) == (tmp_path / "artifacts" / RENDER_ID / "input.json")
+        assert await storage.exists_uri(uri)
+        assert await storage.read_uri(uri) == b'{"ok": true}'
+
+    @pytest.mark.asyncio
+    async def test_publish_file_copies_to_artifact_root(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        storage = LocalStorage(
+            workspace_root=tmp_path / "scratch",
+            artifact_root=tmp_path / "artifacts",
+        )
+        workspace = await storage.create_workspace(RENDER_ID)
+        source = workspace / "source.mp4"
+        source.write_bytes(b"video")
+
+        uri = await storage.publish_file(
+            RENDER_ID,
+            ArtifactType.OUTPUT,
+            source,
+        )
+        source.unlink()
+
+        assert Path(uri).name == "output.mp4"
+        assert await storage.read_uri(uri) == b"video"
+
+    @pytest.mark.asyncio
+    async def test_iter_uri_streams_chunks(self, tmp_path: Path) -> None:
+        storage = LocalStorage(
+            workspace_root=tmp_path / "scratch",
+            artifact_root=tmp_path / "artifacts",
+        )
+        uri = await storage.publish_bytes(
+            RENDER_ID,
+            ArtifactType.LOG,
+            b"abcdef",
+        )
+
+        chunks = [chunk async for chunk in storage.iter_uri(uri, chunk_size=2)]
+
+        assert chunks == [b"ab", b"cd", b"ef"]
+
+    @pytest.mark.asyncio
+    async def test_read_uri_rejects_paths_outside_storage_roots(
+        self,
+        storage: LocalStorage,
+        tmp_path: Path,
+    ) -> None:
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("secret", encoding="utf-8")
+
+        with pytest.raises(StorageError, match="outside configured storage roots"):
+            await storage.read_uri(str(outside))

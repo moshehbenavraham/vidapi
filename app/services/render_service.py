@@ -6,6 +6,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.errors import StorageError
 from app.db import render_crud
 from app.db.models import Render
 from app.models.composition import (
@@ -22,7 +23,7 @@ from app.renderers.editly import EditlyRenderer
 from app.renderers.poster import PosterError, generate_poster
 from app.services.asset_service import AssetService
 from app.services.merge import MergeError, expand_merge_variables
-from app.storage.local import LocalStorage
+from app.storage.base import ArtifactStorageProtocol, ArtifactType
 
 logger = structlog.get_logger(__name__)
 
@@ -52,7 +53,7 @@ class RenderService:
 
     def __init__(
         self,
-        storage: LocalStorage,
+        storage: ArtifactStorageProtocol,
         asset_service: AssetService,
         renderer: EditlyRenderer,
     ) -> None:
@@ -120,6 +121,36 @@ class RenderService:
     # Public stage methods (called by worker or execute_render)
     # ------------------------------------------------------------------
 
+    async def read_artifact_uri(self, uri: str) -> bytes:
+        """Read a previously persisted artifact URI through configured storage."""
+        return await self._storage.read_uri(uri)
+
+    async def publish_artifact_file(
+        self,
+        render_id: str,
+        artifact_type: ArtifactType,
+        source_path: Path,
+        session: AsyncSession,
+        *,
+        suffix: str = "",
+        media_type: str | None = None,
+    ) -> str:
+        """Publish a file and update the matching render artifact path."""
+        artifact_uri = await self._publish_file(
+            render_id,
+            artifact_type,
+            source_path,
+            suffix=suffix,
+            media_type=media_type,
+        )
+        await self._update_artifact_path(
+            session,
+            render_id,
+            artifact_type,
+            artifact_uri,
+        )
+        return artifact_uri
+
     async def stage_validate_and_expand(
         self,
         composition: Composition,
@@ -134,8 +165,15 @@ class RenderService:
         input_json = composition.model_dump_json(indent=2)
         input_path = workspace / "input.json"
         input_path.write_text(input_json, encoding="utf-8")
+        input_uri = await self._publish_bytes(
+            render_id,
+            ArtifactType.INPUT,
+            input_json.encode("utf-8"),
+        )
         await render_crud.update_render_paths(
-            session, render_id, input_path=str(input_path)
+            session,
+            render_id,
+            input_path=input_uri,
         )
 
         try:
@@ -154,8 +192,15 @@ class RenderService:
         expanded_path.write_text(
             expanded_composition.model_dump_json(indent=2), encoding="utf-8"
         )
+        expanded_uri = await self._publish_file(
+            render_id,
+            ArtifactType.EXPANDED,
+            expanded_path,
+        )
         await render_crud.update_render_paths(
-            session, render_id, expanded_path=str(expanded_path)
+            session,
+            render_id,
+            expanded_path=expanded_uri,
         )
 
         await logger.ainfo("stage_validate_complete", render_id=render_id, progress=10)
@@ -186,11 +231,22 @@ class RenderService:
                 str(exc), error_code="COMPILE_ERROR", cause=exc
             ) from exc
 
+        compiled_uri = await self._publish_file(
+            render_id,
+            ArtifactType.COMPILED,
+            compiled.spec_path,
+        )
+        replay_uri = await self._publish_file(
+            render_id,
+            ArtifactType.REPLAY,
+            compiled.replay_path,
+        )
+
         await render_crud.update_render_paths(
             session,
             render_id,
-            compiled_path=str(compiled.spec_path),
-            replay_path=str(compiled.replay_path),
+            compiled_path=compiled_uri,
+            replay_path=replay_uri,
             renderer=self._renderer.name,
         )
 
@@ -223,11 +279,22 @@ class RenderService:
                 str(exc), error_code="RENDER_ERROR", cause=exc
             ) from exc
 
+        output_uri = await self._publish_file(
+            render_id,
+            ArtifactType.OUTPUT,
+            artifact.output_path,
+        )
+        log_uri = await self._publish_file(
+            render_id,
+            ArtifactType.LOG,
+            artifact.log_path,
+        )
+
         await render_crud.update_render_paths(
             session,
             render_id,
-            output_path=str(artifact.output_path),
-            log_path=str(artifact.log_path),
+            output_path=output_uri,
+            log_path=log_uri,
         )
 
         poster_path: Path | None = None
@@ -243,8 +310,15 @@ class RenderService:
             )
 
         if poster_path is not None:
+            poster_uri = await self._publish_file(
+                render_id,
+                ArtifactType.POSTER,
+                poster_path,
+            )
             await render_crud.update_render_paths(
-                session, render_id, poster_path=str(poster_path)
+                session,
+                render_id,
+                poster_path=poster_uri,
             )
 
         log_path = workspace / "logs.txt"
@@ -253,8 +327,15 @@ class RenderService:
                 encoding="utf-8", errors="replace"
             )
             log_path.write_text(log_content, encoding="utf-8")
+            durable_log_uri = await self._publish_file(
+                render_id,
+                ArtifactType.LOG,
+                log_path,
+            )
             await render_crud.update_render_paths(
-                session, render_id, log_path=str(log_path)
+                session,
+                render_id,
+                log_path=durable_log_uri,
             )
 
         await logger.ainfo("stage_render_complete", render_id=render_id, progress=95)
@@ -341,9 +422,22 @@ class RenderService:
             log_path.write_text(
                 f"ERROR ({error_code}): {error_message}\n", encoding="utf-8"
             )
-            await render_crud.update_render_paths(
-                session, render_id, log_path=str(log_path)
-            )
+            try:
+                log_uri = await self._publish_file(
+                    render_id,
+                    ArtifactType.LOG,
+                    log_path,
+                )
+                await render_crud.update_render_paths(
+                    session,
+                    render_id,
+                    log_path=log_uri,
+                )
+            except Exception:
+                await logger.aerror(
+                    "failed_to_publish_failure_log",
+                    render_id=render_id,
+                )
 
         try:
             render = await render_crud.get_render_by_id(session, render_id)
@@ -358,3 +452,77 @@ class RenderService:
                 )
         except Exception:
             await logger.aerror("failed_to_mark_render_as_failed", render_id=render_id)
+
+    async def _publish_bytes(
+        self,
+        render_id: str,
+        artifact_type: ArtifactType,
+        data: bytes,
+        *,
+        suffix: str = "",
+        media_type: str | None = None,
+    ) -> str:
+        try:
+            return await self._storage.publish_bytes(
+                render_id,
+                artifact_type,
+                data,
+                suffix=suffix,
+                media_type=media_type,
+            )
+        except (OSError, StorageError, ValueError) as exc:
+            raise RenderServiceError(
+                f"Failed to publish {artifact_type.value}",
+                error_code="STORAGE_ERROR",
+                cause=exc,
+            ) from exc
+
+    async def _publish_file(
+        self,
+        render_id: str,
+        artifact_type: ArtifactType,
+        source_path: Path,
+        *,
+        suffix: str = "",
+        media_type: str | None = None,
+    ) -> str:
+        try:
+            return await self._storage.publish_file(
+                render_id,
+                artifact_type,
+                source_path,
+                suffix=suffix,
+                media_type=media_type,
+            )
+        except (OSError, StorageError, ValueError) as exc:
+            raise RenderServiceError(
+                f"Failed to publish {artifact_type.value}",
+                error_code="STORAGE_ERROR",
+                cause=exc,
+            ) from exc
+
+    async def _update_artifact_path(
+        self,
+        session: AsyncSession,
+        render_id: str,
+        artifact_type: ArtifactType,
+        artifact_uri: str,
+    ) -> None:
+        kwargs: dict[str, str] = {}
+        if artifact_type is ArtifactType.INPUT:
+            kwargs["input_path"] = artifact_uri
+        elif artifact_type is ArtifactType.EXPANDED:
+            kwargs["expanded_path"] = artifact_uri
+        elif artifact_type is ArtifactType.COMPILED:
+            kwargs["compiled_path"] = artifact_uri
+        elif artifact_type is ArtifactType.OUTPUT:
+            kwargs["output_path"] = artifact_uri
+        elif artifact_type is ArtifactType.POSTER:
+            kwargs["poster_path"] = artifact_uri
+        elif artifact_type is ArtifactType.REPLAY:
+            kwargs["replay_path"] = artifact_uri
+        elif artifact_type is ArtifactType.LOG:
+            kwargs["log_path"] = artifact_uri
+
+        if kwargs:
+            await render_crud.update_render_paths(session, render_id, **kwargs)

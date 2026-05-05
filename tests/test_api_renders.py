@@ -1,9 +1,19 @@
 from __future__ import annotations
 
-import pytest
-from httpx import AsyncClient
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
+
+from app.api.deps import get_session, get_storage_backend, get_storage_url_resolver
+from app.db import render_crud
+from app.main import create_app
+from app.models.render import RenderStatus
 from app.services.merge import MergeError, expand_merge_variables
+from app.storage.base import ArtifactType, StorageBackend, StorageUrlMode
+from app.storage.urls import StorageUrlResolver
 
 # ---------------------------------------------------------------------------
 # Merge variable expansion unit tests
@@ -48,6 +58,44 @@ class TestMergeVariables:
 # ---------------------------------------------------------------------------
 # POST /v1/renders contract tests
 # ---------------------------------------------------------------------------
+
+
+class FakeS3StorageForRoutes:
+    backend = StorageBackend.S3
+
+    def __init__(self, signed_url: str = "https://signed.example/output.mp4") -> None:
+        self.presign_uri = AsyncMock(return_value=signed_url)
+
+
+async def _mark_render_succeeded(session, render_id: str) -> None:
+    await render_crud.update_render_status(session, render_id, RenderStatus.FETCHING)
+    await render_crud.update_render_status(session, render_id, RenderStatus.COMPILING)
+    await render_crud.update_render_status(session, render_id, RenderStatus.RENDERING)
+    await render_crud.update_render_status(session, render_id, RenderStatus.UPLOADING)
+    await render_crud.update_render_status(session, render_id, RenderStatus.SUCCEEDED)
+
+
+@asynccontextmanager
+async def _client_with_storage(db_engine, storage, resolver):
+    app = create_app()
+
+    async def _override_session():
+        async with SQLModelAsyncSession(db_engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _override_session
+    app.dependency_overrides[get_storage_backend] = lambda: storage
+    app.dependency_overrides[get_storage_url_resolver] = lambda: resolver
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        follow_redirects=False,
+    ) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
 
 
 class TestPostRenders:
@@ -164,6 +212,143 @@ class TestDownloadRender:
             dl_resp = await client.get(f"/v1/renders/{render_id}/download")
             assert dl_resp.status_code == 200
             assert dl_resp.headers.get("content-type", "").startswith("video/")
+
+    @pytest.mark.asyncio
+    async def test_proxy_download_streams_storage_artifact(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.OUTPUT,
+            b"video-bytes",
+        )
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            output_path=output_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        response = await client.get(f"/v1/renders/{render_id}/download")
+
+        assert response.status_code == 200
+        assert response.content == b"video-bytes"
+        assert response.headers["content-disposition"].startswith("attachment")
+
+    @pytest.mark.asyncio
+    async def test_poster_endpoint_streams_storage_artifact(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        poster_uri = await test_storage.publish_bytes(
+            render_id,
+            ArtifactType.POSTER,
+            b"poster-bytes",
+        )
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            poster_path=poster_uri,
+        )
+
+        response = await client.get(f"/v1/renders/{render_id}/poster")
+
+        assert response.status_code == 200
+        assert response.content == b"poster-bytes"
+        assert response.headers["content-type"].startswith("image/jpeg")
+
+    @pytest.mark.asyncio
+    async def test_proxy_download_missing_artifact_returns_404(
+        self,
+        client: AsyncClient,
+        db_session,
+        test_storage,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        missing_path = (await test_storage.workspace_path(render_id)) / "output.mp4"
+        missing_uri = str(missing_path)
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            output_path=missing_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        response = await client.get(f"/v1/renders/{render_id}/download")
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_signed_download_endpoint_redirects(
+        self,
+        db_engine,
+        db_session,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        output_uri = "s3://vidapi-renders/renders/render_abc/output.mp4"
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            output_path=output_uri,
+        )
+        await _mark_render_succeeded(db_session, render_id)
+
+        storage = FakeS3StorageForRoutes("https://signed.example/output.mp4?sig=abc")
+        resolver = StorageUrlResolver(
+            storage=storage,  # type: ignore[arg-type]
+            url_mode=StorageUrlMode.SIGNED,
+            signed_url_expiry_seconds=900,
+        )
+
+        async with _client_with_storage(db_engine, storage, resolver) as ac:
+            response = await ac.get(f"/v1/renders/{render_id}/download")
+
+        assert response.status_code == 307
+        assert response.headers["location"] == (
+            "https://signed.example/output.mp4?sig=abc"
+        )
+
+    @pytest.mark.asyncio
+    async def test_public_poster_endpoint_redirects(
+        self,
+        db_engine,
+        db_session,
+    ):
+        render = await render_crud.create_render(db_session)
+        render_id = render.id
+        poster_uri = "s3://vidapi-renders/renders/render_abc/poster.jpg"
+        await render_crud.update_render_paths(
+            db_session,
+            render_id,
+            poster_path=poster_uri,
+        )
+
+        storage = FakeS3StorageForRoutes()
+        resolver = StorageUrlResolver(
+            storage=storage,  # type: ignore[arg-type]
+            url_mode=StorageUrlMode.PUBLIC,
+            signed_url_expiry_seconds=900,
+            public_base_url="https://cdn.example.com",
+        )
+
+        async with _client_with_storage(db_engine, storage, resolver) as ac:
+            response = await ac.get(f"/v1/renders/{render_id}/poster")
+
+        assert response.status_code == 307
+        assert response.headers["location"] == (
+            "https://cdn.example.com/renders/render_abc/poster.jpg"
+        )
 
 
 # ---------------------------------------------------------------------------

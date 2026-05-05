@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.db import render_crud
+
 TEMPLATE_COMPOSITION = {
     "timeline": {
         "background": "#000000",
@@ -89,6 +91,37 @@ async def test_render_template_happy_path(client):
     assert data["progress"] == 0
     assert data["template_id"] == template_id
     assert data["template_version_id"] == tmpl["active_version"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_render_template_persists_input_and_expanded_through_storage(
+    client,
+    db_session,
+    test_storage,
+):
+    tmpl = await _create_template(client)
+    template_id = tmpl["id"]
+
+    resp = await client.post(
+        f"/v1/templates/{template_id}/renders",
+        json={
+            "merge": {
+                "product_image": "https://example.com/product.jpg",
+                "headline": "Buy Now!",
+            }
+        },
+    )
+    assert resp.status_code == 202
+    render_id = resp.json()["id"]
+
+    render = await render_crud.get_render_by_id(db_session, render_id)
+
+    assert render is not None
+    assert render.input_path is not None
+    assert render.expanded_path is not None
+    assert await test_storage.read_uri(render.input_path)
+    expanded_json = await test_storage.read_uri(render.expanded_path)
+    assert b"Buy Now!" in expanded_json
 
 
 @pytest.mark.asyncio

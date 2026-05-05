@@ -13,6 +13,8 @@ import structlog
 from app.core.config import Settings, get_settings
 from app.db import render_crud, webhook_crud
 from app.db.models import Render
+from app.storage.factory import build_storage, build_storage_url_resolver
+from app.storage.urls import StorageUrlResolver
 
 logger = structlog.get_logger(__name__)
 
@@ -21,17 +23,17 @@ def build_webhook_payload(
     *,
     event: str,
     render: Render,
+    url: str | None = None,
+    poster: str | None = None,
 ) -> dict[str, Any]:
     """Construct the PRD-specified webhook payload as a plain dict.
 
     Pure function with no side effects -- suitable for direct testing.
     """
-    url: str | None = None
-    if render.output_path:
+    if url is None and render.output_path:
         url = f"/v1/renders/{render.id}/download"
 
-    poster: str | None = None
-    if render.poster_path:
+    if poster is None and render.poster_path:
         poster = f"/v1/renders/{render.id}/poster"
 
     completed_at: str | None = None
@@ -46,6 +48,21 @@ def build_webhook_payload(
         "poster": poster,
         "completed_at": completed_at,
     }
+
+
+async def build_storage_aware_webhook_payload(
+    *,
+    event: str,
+    render: Render,
+    url_resolver: StorageUrlResolver,
+) -> dict[str, Any]:
+    """Construct a webhook payload with storage-aware artifact URLs."""
+    return build_webhook_payload(
+        event=event,
+        render=render,
+        url=await url_resolver.output_url(render),
+        poster=await url_resolver.poster_url(render),
+    )
 
 
 def sign_payload(payload_bytes: bytes, secret: str) -> tuple[str, str]:
@@ -252,7 +269,16 @@ async def dispatch_webhook(
             return
 
         settings = get_settings()
-        payload = build_webhook_payload(event=event, render=render)
+        storage = build_storage(settings)
+        url_resolver = build_storage_url_resolver(
+            settings=settings,
+            storage=storage,
+        )
+        payload = await build_storage_aware_webhook_payload(
+            event=event,
+            render=render,
+            url_resolver=url_resolver,
+        )
         payload_bytes = json.dumps(payload, ensure_ascii=True).encode("utf-8")
         headers = build_headers(
             payload_bytes,

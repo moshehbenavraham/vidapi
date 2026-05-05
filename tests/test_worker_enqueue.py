@@ -17,6 +17,7 @@ from app.api.deps import (
     get_editly_renderer,
     get_local_storage,
     get_render_service,
+    get_storage_backend,
 )
 from app.core.config import get_settings
 from app.db import render_crud
@@ -25,6 +26,7 @@ from app.main import create_app
 from app.models.render import RenderStatus
 from app.renderers.base import CompiledRender, RenderArtifact
 from app.services.render_service import RenderService
+from app.storage.base import ArtifactType
 from app.storage.local import LocalStorage
 from app.workers.render_worker import enqueue_render, run_render
 from app.workers.workspace import WorkspaceManager
@@ -113,6 +115,28 @@ def sample_composition_dict() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _wire_worker_storage_methods(service: MagicMock) -> None:
+    async def _read_artifact_uri(uri: str) -> bytes:
+        return Path(uri).read_bytes()
+
+    async def _publish_artifact_file(
+        render_id: str,
+        artifact_type: ArtifactType,
+        source_path: Path,
+        session,
+    ) -> str:
+        if artifact_type is ArtifactType.LOG:
+            await render_crud.update_render_paths(
+                session,
+                render_id,
+                log_path=str(source_path),
+            )
+        return str(source_path)
+
+    service.read_artifact_uri = AsyncMock(side_effect=_read_artifact_uri)
+    service.publish_artifact_file = AsyncMock(side_effect=_publish_artifact_file)
+
+
 # ---------------------------------------------------------------------------
 # T017: Unit tests for enqueue path (mocked Redis/ARQ pool)
 # ---------------------------------------------------------------------------
@@ -152,6 +176,7 @@ class TestEnqueuePath:
 
         app.dependency_overrides[get_session] = _override_session
         app.dependency_overrides[get_local_storage] = lambda: storage
+        app.dependency_overrides[get_storage_backend] = lambda: storage
         app.dependency_overrides[get_arq_pool_dep] = lambda: mock_pool
         app.dependency_overrides[get_settings] = lambda: async_settings
 
@@ -194,6 +219,7 @@ class TestEnqueuePath:
 
         app.dependency_overrides[get_session] = _override_session
         app.dependency_overrides[get_local_storage] = lambda: storage
+        app.dependency_overrides[get_storage_backend] = lambda: storage
         app.dependency_overrides[get_arq_pool_dep] = lambda: mock_pool
         app.dependency_overrides[get_settings] = lambda: async_settings
 
@@ -263,6 +289,7 @@ class TestEnqueuePath:
 
         app.dependency_overrides[get_session] = _override_session
         app.dependency_overrides[get_local_storage] = lambda: storage
+        app.dependency_overrides[get_storage_backend] = lambda: storage
         app.dependency_overrides[get_asset_service] = lambda: mock_asset_service
         app.dependency_overrides[get_editly_renderer] = lambda: mock_renderer
         app.dependency_overrides[get_render_service] = lambda: render_service
@@ -319,6 +346,7 @@ class TestWorkerTask:
         mock_service.stage_validate_and_expand = AsyncMock(side_effect=_validate)
         mock_service.stage_resolve_and_compile = AsyncMock(side_effect=_compile)
         mock_service.stage_render_and_store = AsyncMock(side_effect=_render)
+        _wire_worker_storage_methods(mock_service)
 
         ctx = {
             "session_factory": worker_session_factory,
@@ -409,6 +437,7 @@ class TestWorkerTask:
         mock_service.stage_validate_and_expand = AsyncMock(
             side_effect=RuntimeError("boom")
         )
+        _wire_worker_storage_methods(mock_service)
 
         ctx = {
             "session_factory": worker_session_factory,
@@ -441,6 +470,8 @@ class TestWorkerTask:
             )
 
         mock_service = MagicMock(spec=RenderService)
+        _wire_worker_storage_methods(mock_service)
+        mock_service.read_artifact_uri = AsyncMock(side_effect=FileNotFoundError)
         ctx = {
             "session_factory": worker_session_factory,
             "render_service": mock_service,

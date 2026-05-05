@@ -89,10 +89,12 @@ GitHub Actions workflows at `.github/workflows/`.
 
 ## Render Artifact Storage
 
-Each render produces artifacts in a deterministic directory:
+Renderers always write to a local scratch workspace because Editly and FFmpeg
+need filesystem paths. After each stage, VidAPI publishes durable artifacts
+through the configured storage backend:
 
 ```
-data/renders/<render_id>/
+<backend>/<render_id>/
   input.json              # Original composition
   expanded.json           # After merge variable substitution
   compiled.editly.json    # Compiled Editly spec
@@ -101,6 +103,36 @@ data/renders/<render_id>/
   poster.jpg              # Poster frame
   logs.txt                # Structured render log (stage entries)
 ```
+
+Local mode is the default and stores durable files under
+`STORAGE_ROOT/artifacts/<render_id>/`. This is suitable for one-host
+development and tests.
+
+S3-compatible mode stores durable fields as `s3://bucket/key` URIs. API and
+worker processes must use the same settings:
+
+```bash
+STORAGE_BACKEND=s3
+STORAGE_URL_MODE=proxy
+S3_BUCKET=vidapi-renders
+S3_REGION=us-east-1
+S3_ENDPOINT_URL=https://s3.example.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_OBJECT_PREFIX=renders
+S3_FORCE_PATH_STYLE=true
+```
+
+URL modes:
+
+| Mode | Behavior |
+|------|----------|
+| `proxy` | API streams local or S3 artifacts through `/download` and `/poster` |
+| `signed` | S3 status/webhook URLs and direct endpoints use presigned redirects |
+| `public` | S3 status/webhook URLs and direct endpoints use `S3_PUBLIC_BASE_URL` |
+
+Use `proxy` unless clients should bypass the API for artifact bytes. `public`
+mode requires a public object base URL with no embedded credentials.
 
 ## Health Check
 
@@ -125,6 +157,5 @@ renderer subprocess failures increase.
 ## Production Deployment (Planned)
 
 Phase 03 will add:
-- S3-compatible storage for artifacts
 - API key authentication
 - Operational visibility and production stack wiring

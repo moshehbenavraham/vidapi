@@ -4,7 +4,7 @@
 **Sessions**: 5 (initial estimate)
 **Estimated Duration**: 10-20 days
 
-**Progress**: 1/5 sessions (20%)
+**Progress**: 2/5 sessions (40%)
 
 ---
 
@@ -19,7 +19,7 @@ Make VidAPI safe and operable outside local development by adding production dat
 | Session | Name | Status | Est. Tasks | Validated |
 |---------|------|--------|------------|-----------|
 | 01 | PostgreSQL Persistence and Alembic Migrations | Complete | ~20 | 2026-05-05 |
-| 02 | S3-compatible Storage and Download Modes | Not Started | ~20 | - |
+| 02 | S3-compatible Storage and Download Modes | Complete | ~20 | 2026-05-05 |
 | 03 | API Key Authentication and Access Control | Not Started | ~18 | - |
 | 04 | Limits, Resource Controls, and Asset Security Hardening | Not Started | ~20 | - |
 | 05 | Operational Visibility and Production Stack | Not Started | ~20 | - |
@@ -29,12 +29,13 @@ Make VidAPI safe and operable outside local development by adding production dat
 ## Completed Sessions
 
 - Session 01: PostgreSQL Persistence and Alembic Migrations (2026-05-05)
+- Session 02: S3-compatible Storage and Download Modes (2026-05-05)
 
 ---
 
 ## Upcoming Sessions
 
-- Session 02: S3-compatible Storage and Download Modes
+- Session 03: API Key Authentication and Access Control
 
 ---
 

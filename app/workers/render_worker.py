@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 from arq.connections import ArqRedis
 
+from app.api.errors import StorageError
 from app.core.config import get_settings
 from app.db import render_crud
 from app.db.session import _get_engine
@@ -16,6 +17,7 @@ from app.models.render import RenderStatus
 from app.services.ffmpeg_progress import compute_progress_percent, parse_time_from_line
 from app.services.render_service import RenderService, RenderServiceError
 from app.services.webhook_service import dispatch_webhook
+from app.storage.base import ArtifactType
 from app.workers.log_collector import RenderLogCollector
 from app.workers.workspace import WorkspaceManager
 
@@ -82,24 +84,56 @@ async def run_render(ctx: dict[str, Any], render_id: str) -> None:
             )
             return
 
-        from pathlib import Path
-
-        input_path = Path(render.input_path)
-        if not input_path.is_file():
+        try:
+            input_bytes = await render_service.read_artifact_uri(render.input_path)
+            input_json = input_bytes.decode("utf-8")
+        except FileNotFoundError:
             await _mark_failed(
                 session_factory,
                 render_id,
                 ErrorCode.INPUT_FILE_MISSING,
-                f"Input file not found: {input_path}",
+                "Stored input artifact was not found",
                 log_collector,
                 workspace,
             )
             return
+        except StorageError as exc:
+            await _mark_failed(
+                session_factory,
+                render_id,
+                ErrorCode.STORAGE_ERROR,
+                "Failed to read stored render input",
+                log_collector,
+                workspace,
+            )
+            await logger.aerror(
+                "worker_input_storage_read_failed",
+                render_id=render_id,
+                error=str(exc),
+            )
+            return
+
+        from pydantic import ValidationError
 
         from app.models.composition import Composition
 
-        input_json = input_path.read_text(encoding="utf-8")
-        composition = Composition.model_validate_json(input_json)
+        try:
+            composition = Composition.model_validate_json(input_json)
+        except ValidationError as exc:
+            await _mark_failed(
+                session_factory,
+                render_id,
+                ErrorCode.INVALID_COMPOSITION,
+                "Stored composition failed validation",
+                log_collector,
+                workspace,
+            )
+            await logger.aerror(
+                "worker_input_validation_failed",
+                render_id=render_id,
+                error=str(exc),
+            )
+            return
 
     # Pipeline execution with workspace lifecycle
     try:
@@ -119,9 +153,19 @@ async def run_render(ctx: dict[str, Any], render_id: str) -> None:
         # Flush logs before cleanup
         log_path = await log_collector.flush(workspace)
         if log_path is not None:
-            async with session_factory() as session:
-                await render_crud.update_render_paths(
-                    session, render_id, log_path=str(log_path)
+            try:
+                async with session_factory() as session:
+                    await render_service.publish_artifact_file(
+                        render_id,
+                        ArtifactType.LOG,
+                        log_path,
+                        session,
+                    )
+            except Exception as exc:
+                await logger.awarning(
+                    "worker_log_publish_failed",
+                    render_id=render_id,
+                    error=str(exc),
                 )
 
         await workspace_mgr.cleanup_success(workspace)
@@ -139,7 +183,22 @@ async def run_render(ctx: dict[str, Any], render_id: str) -> None:
 
         # Flush logs before marking failed
         if workspace is not None:
-            await log_collector.flush(workspace)
+            log_path = await log_collector.flush(workspace)
+            if log_path is not None:
+                try:
+                    async with session_factory() as session:
+                        await render_service.publish_artifact_file(
+                            render_id,
+                            ArtifactType.LOG,
+                            log_path,
+                            session,
+                        )
+                except Exception as publish_exc:
+                    await logger.awarning(
+                        "worker_failure_log_publish_failed",
+                        render_id=render_id,
+                        error=str(publish_exc),
+                    )
 
         await _mark_failed(
             session_factory,
@@ -436,13 +495,13 @@ async def worker_startup(ctx: dict[str, Any]) -> None:
 
     from app.renderers.editly import EditlyRenderer
     from app.services.asset_service import AssetService
-    from app.storage.local import LocalStorage
+    from app.storage.factory import build_storage
 
     settings = get_settings()
 
     engine = _get_engine()
 
-    storage = LocalStorage(workspace_root=settings.render_workspace_root)
+    storage = build_storage(settings)
     asset_service = AssetService(settings=settings)
     renderer = EditlyRenderer(settings=settings)
     render_service = RenderService(

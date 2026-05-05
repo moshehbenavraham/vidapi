@@ -14,7 +14,10 @@ from app.renderers.editly import EditlyRenderer
 from app.services.asset_service import AssetService
 from app.services.render_service import RenderService
 from app.services.template_service import TemplateService
+from app.storage.base import ArtifactStorageProtocol
+from app.storage.factory import build_storage, build_storage_url_resolver
 from app.storage.local import LocalStorage
+from app.storage.urls import StorageUrlResolver
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DBSessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -37,7 +40,22 @@ ArqPoolDep = Annotated[ArqRedis | None, Depends(get_arq_pool_dep)]
 @lru_cache(maxsize=1)
 def get_local_storage() -> LocalStorage:
     settings = get_settings()
-    return LocalStorage(workspace_root=settings.render_workspace_root)
+    return LocalStorage(
+        workspace_root=settings.render_workspace_root,
+        artifact_root=settings.storage_root / "artifacts",
+    )
+
+
+@lru_cache(maxsize=1)
+def get_storage_backend() -> ArtifactStorageProtocol:
+    return build_storage(get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_storage_url_resolver() -> StorageUrlResolver:
+    settings = get_settings()
+    storage = get_storage_backend()
+    return build_storage_url_resolver(settings=settings, storage=storage)
 
 
 @lru_cache(maxsize=1)
@@ -55,7 +73,7 @@ def get_editly_renderer() -> EditlyRenderer:
 @lru_cache(maxsize=1)
 def get_render_service() -> RenderService:
     return RenderService(
-        storage=get_local_storage(),
+        storage=get_storage_backend(),
         asset_service=get_asset_service(),
         renderer=get_editly_renderer(),
     )
@@ -67,7 +85,11 @@ def get_template_service() -> TemplateService:
 
 
 TemplateServiceDep = Annotated[TemplateService, Depends(get_template_service)]
-StorageDep = Annotated[LocalStorage, Depends(get_local_storage)]
+StorageDep = Annotated[ArtifactStorageProtocol, Depends(get_storage_backend)]
+StorageUrlResolverDep = Annotated[
+    StorageUrlResolver,
+    Depends(get_storage_url_resolver),
+]
 AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
 EditlyRendererDep = Annotated[EditlyRenderer, Depends(get_editly_renderer)]
 RenderServiceDep = Annotated[RenderService, Depends(get_render_service)]

@@ -11,8 +11,10 @@ from app.api.deps import (
     ArqPoolDep,
     DBSessionDep,
     SettingsDep,
+    StorageDep,
     TemplateServiceDep,
 )
+from app.api.errors import StorageError
 from app.db import render_crud
 from app.db.template_models import TemplateVersion
 from app.models.errors import (
@@ -42,6 +44,7 @@ from app.services.template_service import (
     TemplateDeletedError,
     TemplateNotFoundError,
 )
+from app.storage.base import ArtifactType
 from app.workers.render_worker import enqueue_render
 
 logger = structlog.get_logger(__name__)
@@ -286,6 +289,7 @@ async def render_template(
     session: DBSessionDep,
     settings: SettingsDep,
     arq_pool: ArqPoolDep,
+    storage: StorageDep,
 ) -> TemplateRenderResponse:
     """Render a template with merge data.
 
@@ -342,27 +346,36 @@ async def render_template(
     )
     render_id = render.id
 
-    from app.api.deps import get_local_storage
-
-    storage = get_local_storage()
-    workspace = await storage.create_workspace(render_id)
-
-    input_path = workspace / "input.json"
-    input_path.write_text(
-        expanded_composition.model_dump_json(indent=2), encoding="utf-8"
-    )
-
-    expanded_path = workspace / "expanded.json"
-    expanded_path.write_text(
-        json.dumps(expanded_dict, indent=2, ensure_ascii=True), encoding="utf-8"
-    )
-
-    await render_crud.update_render_paths(
-        session,
-        render_id,
-        input_path=str(input_path),
-        expanded_path=str(expanded_path),
-    )
+    try:
+        input_uri = await storage.publish_bytes(
+            render_id,
+            ArtifactType.INPUT,
+            expanded_composition.model_dump_json(indent=2).encode("utf-8"),
+        )
+        expanded_uri = await storage.publish_bytes(
+            render_id,
+            ArtifactType.EXPANDED,
+            json.dumps(expanded_dict, indent=2, ensure_ascii=True).encode("utf-8"),
+        )
+        await render_crud.update_render_paths(
+            session,
+            render_id,
+            input_path=input_uri,
+            expanded_path=expanded_uri,
+        )
+    except (OSError, StorageError) as exc:
+        await render_crud.update_render_status(
+            session,
+            render_id,
+            RenderStatus.FAILED,
+            error_code="STORAGE_ERROR",
+            error_message="Failed to persist template render input",
+            stage="failed",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist template render input.",
+        ) from exc
 
     if settings.render_mode == "async":
         if arq_pool is None:

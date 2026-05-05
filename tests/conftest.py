@@ -18,6 +18,8 @@ from app.api.deps import (
     get_editly_renderer,
     get_local_storage,
     get_render_service,
+    get_storage_backend,
+    get_storage_url_resolver,
     get_template_service,
 )
 from app.core.config import Settings, get_settings, reset_settings_cache
@@ -28,7 +30,9 @@ from app.renderers.editly import EditlyRenderer
 from app.services.asset_service import AssetService, ResolvedAsset
 from app.services.render_service import RenderService
 from app.services.template_service import TemplateService
+from app.storage.base import StorageUrlMode
 from app.storage.local import LocalStorage
+from app.storage.urls import StorageUrlResolver
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -36,8 +40,22 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture(autouse=True)
 def reset_app_settings_cache() -> Iterator[None]:
     reset_settings_cache()
+    get_local_storage.cache_clear()
+    get_storage_backend.cache_clear()
+    get_storage_url_resolver.cache_clear()
+    get_asset_service.cache_clear()
+    get_editly_renderer.cache_clear()
+    get_render_service.cache_clear()
+    get_template_service.cache_clear()
     yield
     reset_settings_cache()
+    get_local_storage.cache_clear()
+    get_storage_backend.cache_clear()
+    get_storage_url_resolver.cache_clear()
+    get_asset_service.cache_clear()
+    get_editly_renderer.cache_clear()
+    get_render_service.cache_clear()
+    get_template_service.cache_clear()
 
 
 @pytest.fixture
@@ -148,6 +166,15 @@ def render_service(
 
 
 @pytest.fixture
+def test_url_resolver(test_storage: LocalStorage) -> StorageUrlResolver:
+    return StorageUrlResolver(
+        storage=test_storage,
+        url_mode=StorageUrlMode.PROXY,
+        signed_url_expiry_seconds=900,
+    )
+
+
+@pytest.fixture
 def sample_composition() -> dict:
     path = FIXTURES_DIR / "sample_composition.json"
     return json.loads(path.read_text(encoding="utf-8"))
@@ -157,6 +184,7 @@ def sample_composition() -> dict:
 async def client(
     db_engine,
     test_storage,
+    test_url_resolver,
     mock_asset_service,
     mock_renderer,
     render_service,
@@ -169,6 +197,8 @@ async def client(
 
     app.dependency_overrides[get_session] = _override_session
     app.dependency_overrides[get_local_storage] = lambda: test_storage
+    app.dependency_overrides[get_storage_backend] = lambda: test_storage
+    app.dependency_overrides[get_storage_url_resolver] = lambda: test_url_resolver
     app.dependency_overrides[get_asset_service] = lambda: mock_asset_service
     app.dependency_overrides[get_editly_renderer] = lambda: mock_renderer
     app.dependency_overrides[get_render_service] = lambda: render_service
