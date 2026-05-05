@@ -40,6 +40,50 @@ jobs:
           echo "TODO: connect a real deployment target for this repository."
           echo "Running production-like validation locally until a target exists."
 
+      - name: Generate production env file
+        run: |
+          cat > .env.production.example <<'EOF'
+          APP_NAME=VidAPI
+          APP_VERSION=0.1.1
+          ENVIRONMENT=production
+          DEBUG=false
+          LOG_LEVEL=INFO
+
+          DATABASE_URL=postgresql+asyncpg://vidapi:change-me-postgres@postgres:5432/vidapi
+          DATABASE_AUTO_CREATE=false
+          POSTGRES_USER=vidapi
+          POSTGRES_PASSWORD=change-me-postgres
+          POSTGRES_DB=vidapi
+
+          RENDER_MODE=async
+          REDIS_URL=redis://:change-me-redis@redis:6379/0
+          REDIS_PASSWORD=change-me-redis
+          REDIS_REQUIRE_AUTH_IN_PRODUCTION=true
+          REDIS_REQUIRE_TLS_IN_PRODUCTION=false
+
+          API_KEY_AUTH_ENABLED=true
+          API_KEY_HASHES=0000000000000000000000000000000000000000000000000000000000000000
+          ALLOWED_HOSTS=["localhost","127.0.0.1","api","testserver"]
+          CORS_ORIGINS=["http://localhost","http://localhost:8000"]
+
+          STORAGE_BACKEND=s3
+          STORAGE_URL_MODE=proxy
+          STORAGE_ROOT=data
+          RENDER_WORKSPACE_ROOT=data/renders
+          ASSET_CACHE_ROOT=data/assets
+
+          S3_BUCKET=vidapi-renders
+          S3_ENDPOINT_URL=http://minio:9000
+          S3_REGION=us-east-1
+          S3_ACCESS_KEY_ID=vidapi-minio
+          S3_SECRET_ACCESS_KEY=change-me-minio
+          S3_OBJECT_PREFIX=renders
+          S3_FORCE_PATH_STYLE=true
+
+          MINIO_ROOT_USER=vidapi-minio
+          MINIO_ROOT_PASSWORD=change-me-minio
+          EOF
+
       - name: Start production-like stack
         run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build
 
