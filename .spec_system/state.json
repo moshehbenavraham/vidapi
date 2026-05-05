@@ -27,7 +27,7 @@
     "3": {
       "name": "Production Hardening",
       "description": "PostgreSQL persistence and migrations, S3-compatible storage, API key authentication, production limits and resource controls, operational visibility, and production-like Docker Compose stack",
-      "status": "in_progress",
+      "status": "complete",
       "session_count": 5
     },
     "4": {
@@ -54,7 +54,9 @@
     "phase02-session05-audio-polish-and-hardening",
     "phase03-session01-postgresql-persistence-and-alembic-migrations",
     "phase03-session02-s3-compatible-storage-and-download-modes",
-    "phase03-session03-api-key-authentication-and-access-control"
+    "phase03-session03-api-key-authentication-and-access-control",
+    "phase03-session04-limits-resource-controls-and-asset-security-hardening",
+    "phase03-session05-operational-visibility-and-production-stack"
   ],
   "next_session_history": [
     {
@@ -315,6 +317,31 @@
     {
       "date": "2026-05-05",
       "session": "phase03-session03-api-key-authentication-and-access-control",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase03-session04-limits-resource-controls-and-asset-security-hardening",
+      "status": "planned"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase03-session04-limits-resource-controls-and-asset-security-hardening",
+      "status": "completed"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase03-session05-operational-visibility-and-production-stack",
+      "status": "planned"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase03-session05-operational-visibility-and-production-stack",
+      "status": "validated"
+    },
+    {
+      "date": "2026-05-05",
+      "session": "phase03-session05-operational-visibility-and-production-stack",
       "status": "completed"
     }
   ]

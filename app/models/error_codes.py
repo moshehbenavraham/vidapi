@@ -19,6 +19,10 @@ class ErrorCode(StrEnum):
     NO_INPUT_DATA = "NO_INPUT_DATA"
     INPUT_FILE_MISSING = "INPUT_FILE_MISSING"
     QUEUE_UNAVAILABLE = "QUEUE_UNAVAILABLE"
+    QUEUE_SATURATED = "QUEUE_SATURATED"
+    REQUEST_BODY_TOO_LARGE = "REQUEST_BODY_TOO_LARGE"
+    LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
+    MEDIA_LIMIT_EXCEEDED = "MEDIA_LIMIT_EXCEEDED"
     RENDER_CANCELLED = "RENDER_CANCELLED"
     WORKER_UNEXPECTED_ERROR = "WORKER_UNEXPECTED_ERROR"
     INVALID_COMPOSITION = "INVALID_COMPOSITION"
@@ -52,8 +56,9 @@ def _register_defaults() -> None:
     Called at module load. Additional mappings can be registered at runtime
     via register_exception() for plugin renderers.
     """
-    from app.api.errors import AssetFetchError
+    from app.api.errors import AssetFetchError, MediaLimitError
     from app.renderers.base import CompileError, RenderError
+    from app.services.limits import LimitExceededError
     from app.services.merge import MergeError
     from app.services.render_service import RenderServiceError
     from app.services.template_engine import (
@@ -64,6 +69,8 @@ def _register_defaults() -> None:
     register_exception(CompileError, ErrorCode.COMPILE_ERROR)
     register_exception(RenderError, ErrorCode.RENDER_ERROR)
     register_exception(AssetFetchError, ErrorCode.ASSET_FETCH_ERROR)
+    register_exception(MediaLimitError, ErrorCode.MEDIA_LIMIT_EXCEEDED)
+    register_exception(LimitExceededError, ErrorCode.LIMIT_EXCEEDED)
     register_exception(MergeError, ErrorCode.MERGE_ERROR)
     register_exception(TimeoutError, ErrorCode.RENDER_TIMEOUT)
     register_exception(asyncio.TimeoutError, ErrorCode.RENDER_TIMEOUT)

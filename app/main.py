@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
@@ -13,12 +14,14 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.api.auth import require_api_key
 from app.api.errors import register_error_handlers
 from app.api.routes_health import router as health_router
+from app.api.routes_ops import router as ops_router
 from app.api.routes_renders import router as renders_router
 from app.api.routes_templates import router as templates_router
 from app.core.config import get_settings
-from app.core.logging import setup_logging
+from app.core.logging import build_request_log_fields, setup_logging
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis import close_arq_pool, create_arq_pool
+from app.core.request_limits import RequestBodyLimitMiddleware
 from app.db.session import (
     DatabaseConfigurationError,
     DatabaseConnectionError,
@@ -103,11 +106,42 @@ def create_app() -> FastAPI:
         call_next: Callable[[Request], Coroutine[Any, Any, Response]],
     ) -> Response:
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        start_time = time.perf_counter()
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            await logger.aexception(
+                "request_failed",
+                **build_request_log_fields(
+                    request_id=request_id,
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=500,
+                    duration_ms=duration_ms,
+                ),
+            )
+            structlog.contextvars.clear_contextvars()
+            raise
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
         response.headers["X-Request-ID"] = request_id
+        await logger.ainfo(
+            "request_completed",
+            **build_request_log_fields(
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            ),
+        )
+        structlog.contextvars.clear_contextvars()
         return response
+
+    app.add_middleware(RequestBodyLimitMiddleware)
 
     register_error_handlers(app)
 
@@ -121,6 +155,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         templates_router,
+        prefix="/v1",
+        dependencies=protected_dependencies,
+    )
+    app.include_router(
+        ops_router,
         prefix="/v1",
         dependencies=protected_dependencies,
     )

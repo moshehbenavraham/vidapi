@@ -11,6 +11,7 @@ import httpx
 import structlog
 
 from app.core.config import Settings, get_settings
+from app.core.logging import safe_log_excerpt
 from app.db import render_crud, webhook_crud
 from app.db.models import Render
 from app.storage.factory import build_storage, build_storage_url_resolver
@@ -163,6 +164,7 @@ async def _deliver_single_attempt(
             render_id=render_id,
             webhook_event=event,
             attempt=attempt_number,
+            outcome="success",
             status_code=status_code,
         )
     else:
@@ -171,8 +173,10 @@ async def _deliver_single_attempt(
             render_id=render_id,
             webhook_event=event,
             attempt=attempt_number,
+            outcome="failure",
             status_code=status_code,
-            error_detail=error_msg,
+            error_excerpt=safe_log_excerpt(error_msg),
+            response_body_excerpt=safe_log_excerpt(response_excerpt),
         )
 
     return success

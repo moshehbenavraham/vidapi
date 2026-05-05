@@ -27,6 +27,15 @@ This starts three services:
 - **worker** -- ARQ consumer with Editly/FFmpeg for rendering
 - **redis** (port 6379) -- Job queue broker
 
+For a production-like local stack with API, worker, Redis AUTH, PostgreSQL, and
+MinIO:
+
+```bash
+cp .env.production.example .env.production
+# Replace change-me values and API_KEY_HASHES before use.
+docker compose --env-file .env.production -f docker-compose.prod.yml up --build
+```
+
 ### Environment Customization
 
 Default environment values live in `.env.docker`. Override any variable:
@@ -111,6 +120,21 @@ curl -H "X-API-Key: $VIDAPI_API_KEY" http://localhost:8000/v1/renders
 | `GET` | `/v1/renders/{id}/download` | Download rendered output |
 | `GET` | `/v1/renders/{id}/poster` | Download or redirect to a render poster |
 
+### Operational Endpoints
+
+Operational endpoints are mounted under `/v1/ops` and require `X-API-Key` when
+API key auth is enabled.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/ops/renders` | Recent renders with pagination and optional status filter |
+| `GET` | `/v1/ops/renders/failures` | Recent failed renders with redacted error excerpts |
+| `GET` | `/v1/ops/renders/status-counts` | Current render counts by status |
+| `GET` | `/v1/ops/renders/renderer-failures` | Failed render counts by renderer and error code |
+| `GET` | `/v1/ops/webhooks` | Recent webhook attempts with optional render filter |
+| `GET` | `/v1/ops/webhooks/outcome-counts` | Webhook outcomes by event |
+| `GET` | `/v1/ops/metrics` | Prometheus-style metrics text |
+
 ### Template Endpoints
 
 | Method | Path | Purpose |
@@ -134,6 +158,29 @@ Interactive API docs at `http://localhost:8000/docs` (Swagger) or `/redoc`.
 Production startup requires API key auth to be enabled and at least one hash to
 be configured. Raw API keys are never configured in VidAPI settings.
 
+### Resource Limits
+
+VidAPI rejects over-limit work before it is persisted or queued. The main local
+settings are:
+
+```bash
+MAX_RENDER_REQUEST_BODY_BYTES=2097152
+MAX_TEMPLATE_REQUEST_BODY_BYTES=2097152
+MAX_RENDER_DURATION_SECONDS=120
+MAX_OUTPUT_WIDTH=1920
+MAX_OUTPUT_HEIGHT=1920
+MAX_FPS=60
+MAX_TRACKS_PER_RENDER=50
+MAX_CLIPS_PER_RENDER=50
+MAX_ASSETS_PER_RENDER=100
+MAX_ASYNC_QUEUE_DEPTH=1000
+```
+
+Oversized HTTP bodies return 413 with `REQUEST_BODY_TOO_LARGE`. Over-limit
+compositions or media metadata return 422 with `COMPOSITION_LIMIT_EXCEEDED` or
+`MEDIA_LIMIT_EXCEEDED`. Saturated async queues return 429 with `QUEUE_SATURATED`
+and a `Retry-After` header.
+
 ## Documentation
 
 - [Getting Started](docs/onboarding.md)
@@ -141,6 +188,7 @@ be configured. Raw API keys are never configured in VidAPI settings.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Deployment](docs/deployment.md)
 - [Environments](docs/environments.md)
+- [Operations](docs/operations.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Tech Stack
@@ -148,7 +196,7 @@ be configured. Raw API keys are never configured in VidAPI settings.
 - **FastAPI** - Async web framework with auto OpenAPI docs
 - **Pydantic v2** - Discriminated unions for composition schema validation
 - **ARQ + Redis** - Async job queue for render workers
-- **SQLModel + aiosqlite** - Async database (SQLite dev, PostgreSQL planned)
+- **SQLModel + aiosqlite/asyncpg** - Async database (SQLite dev, PostgreSQL prod)
 - **Alembic** - Database migrations
 - **Editly** - Default video renderer (Node.js subprocess)
 - **FFmpeg** - Video encoding, poster extraction, audio mixing, media probing
@@ -156,6 +204,7 @@ be configured. Raw API keys are never configured in VidAPI settings.
 - **Jinja2** - Sandboxed template expansion for reusable compositions
 - **httpx** - Async asset downloads with SSRF protection
 - **structlog** - Structured JSON logging
+- **S3-compatible storage** - Production artifact backend with MinIO validation
 
 ## Project Status
 
@@ -167,7 +216,7 @@ Phases 00, 01, and 02 are complete; Phase 03 is in progress. See
 | 00 | Foundation | Complete (5/5 sessions) |
 | 01 | Async Jobs and Multi-track | Complete (5/5 sessions) |
 | 02 | Templates and Polish | Complete (5/5 sessions) |
-| 03 | Production Hardening | In Progress (1/5 sessions) |
+| 03 | Production Hardening | In Progress (4/5 sessions) |
 | 04 | Advanced Rendering | Not Started |
 
 ## License

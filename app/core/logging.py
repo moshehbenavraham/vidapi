@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import traceback
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,25 @@ from typing import Any
 import structlog
 
 LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+MAX_LOG_EXCERPT_CHARS = 500
+REDACTED_LOG_VALUE = "[REDACTED]"
+SENSITIVE_LOG_FIELD_PARTS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "callback",
+        "composition",
+        "cookie",
+        "credential",
+        "password",
+        "presigned",
+        "secret",
+        "signature",
+        "token",
+        "url",
+    }
+)
 
 
 def setup_logging(log_level: str = "INFO", json_output: bool = True) -> None:
@@ -62,6 +82,47 @@ def setup_logging(log_level: str = "INFO", json_output: bool = True) -> None:
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)  # type: ignore[no-any-return]
+
+
+def build_request_log_fields(
+    *,
+    request_id: str,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: float,
+) -> dict[str, Any]:
+    """Return safe structured fields for request completion logs."""
+    return {
+        "request_id": request_id,
+        "method": method,
+        "path": path,
+        "status_code": status_code,
+        "duration_ms": round(duration_ms, 3),
+    }
+
+
+def redact_log_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Redact known sensitive fields before they are attached to logs."""
+    return {
+        key: REDACTED_LOG_VALUE if is_sensitive_log_field(key) else value
+        for key, value in fields.items()
+    }
+
+
+def is_sensitive_log_field(field_name: str) -> bool:
+    normalized = field_name.lower().replace("-", "_")
+    return any(part in normalized for part in SENSITIVE_LOG_FIELD_PARTS)
+
+
+def safe_log_excerpt(
+    value: str | None,
+    *,
+    limit: int = MAX_LOG_EXCERPT_CHARS,
+) -> str | None:
+    if value is None:
+        return None
+    return value[:limit]
 
 
 def write_last_error(

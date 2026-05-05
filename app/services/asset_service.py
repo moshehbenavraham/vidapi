@@ -6,15 +6,16 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import structlog
 
-from app.api.errors import AssetFetchError
+from app.api.errors import AssetFetchError, MediaLimitError
 from app.core.config import Settings
 from app.models.composition import TextAsset
 from app.services.ffprobe import FFProbeError, MediaInfo, probe
+from app.services.limits import LimitExceededError, validate_media_limits
 from app.services.ssrf import SSRFValidationError, validate_redirect_url, validate_url
 from app.services.text_renderer import TextRenderOptions, render_text_to_png
 
@@ -58,6 +59,7 @@ class AssetService:
         self._cache_root = settings.asset_cache_root.resolve()
         self._max_bytes = settings.max_asset_size_mb * 1024 * 1024
         self._timeout = settings.asset_download_timeout_seconds
+        self._max_redirects = settings.asset_max_redirects
         self._allow_http = settings.asset_allow_http
         self._mime_allowlist = frozenset(settings.asset_mime_allowlist)
         self._allowed_asset_dirs = [
@@ -111,6 +113,7 @@ class AssetService:
         if cached is not None:
             logger.info("asset_cache_hit_url", url=url, path=str(cached))
             media_info = await self._safe_probe(cached)
+            self._validate_media_info(media_info)
             return ResolvedAsset(
                 local_path=cached,
                 content_hash=None,
@@ -130,6 +133,7 @@ class AssetService:
                 hash=content_hash,
             )
             media_info = await self._safe_probe(cached_path)
+            self._validate_media_info(media_info)
             return ResolvedAsset(
                 local_path=cached_path,
                 content_hash=content_hash,
@@ -141,6 +145,7 @@ class AssetService:
         dest = self._store_in_cache(content_hash, data)
 
         media_info = await self._safe_probe(dest)
+        self._validate_media_info(media_info)
         return ResolvedAsset(
             local_path=dest,
             content_hash=content_hash,
@@ -176,35 +181,39 @@ class AssetService:
         self,
         client: httpx.AsyncClient,
         url: str,
-        *,
-        max_redirects: int = 5,
     ) -> bytes:
         """Follow redirects manually to validate each hop against SSRF."""
         current_url = url
-        for _ in range(max_redirects):
+        redirect_count = 0
+
+        while True:
             response = await client.get(current_url)
 
             if response.is_redirect:
+                if redirect_count >= self._max_redirects:
+                    raise AssetFetchError(
+                        detail="Too many redirects",
+                        context={
+                            "url": url,
+                            "max_redirects": self._max_redirects,
+                        },
+                    )
                 location = response.headers.get("location")
                 if not location:
                     raise AssetFetchError(
                         detail="Redirect with no Location header",
                         context={"url": current_url},
                     )
+                current_url = urljoin(current_url, location)
                 validate_redirect_url(
-                    location,
+                    current_url,
                     allow_http=self._allow_http,
                 )
-                current_url = location
+                redirect_count += 1
                 continue
 
             response.raise_for_status()
             return self._validate_response(response, url)
-
-        raise AssetFetchError(
-            detail="Too many redirects",
-            context={"url": url, "max_redirects": max_redirects},
-        )
 
     # ------------------------------------------------------------------
     # Response validation (T010)
@@ -291,10 +300,20 @@ class AssetService:
         try:
             return await probe(
                 path,
+                ffprobe_bin=self._settings.ffprobe_bin,
                 timeout_seconds=self._ffprobe_timeout,
+                kill_grace_seconds=self._settings.subprocess_kill_grace_seconds,
             )
         except FFProbeError:
             return None
+
+    def _validate_media_info(self, media_info: MediaInfo | None) -> None:
+        if media_info is None:
+            return
+        try:
+            validate_media_limits(media_info, self._settings)
+        except LimitExceededError as exc:
+            raise MediaLimitError.from_violation(exc.violation) from exc
 
     # ------------------------------------------------------------------
     # Text asset resolution (T013)
@@ -374,6 +393,7 @@ class AssetService:
                 )
 
         media_info = await self._safe_probe(file_path)
+        self._validate_media_info(media_info)
         return ResolvedAsset(
             local_path=file_path,
             content_hash=None,

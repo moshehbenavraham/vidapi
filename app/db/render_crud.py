@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func
@@ -9,6 +10,25 @@ from sqlmodel import col, select
 
 from app.db.models import Render
 from app.models.render import RenderStatus
+
+
+@dataclass(frozen=True)
+class RenderStatusCount:
+    status: str
+    count: int
+
+
+@dataclass(frozen=True)
+class RendererFailureCount:
+    renderer: str
+    error_code: str
+    count: int
+
+
+@dataclass(frozen=True)
+class RenderTimingSample:
+    render_id: str
+    seconds: float
 
 
 async def _commit_and_refresh(session: AsyncSession, *instances: object) -> None:
@@ -122,6 +142,128 @@ async def list_renders(
     items = list(result.scalars().all())
 
     return items, total
+
+
+async def count_renders_by_status(session: AsyncSession) -> list[RenderStatusCount]:
+    """Return render counts grouped by status with deterministic ordering."""
+    result = await session.execute(
+        select(Render.status, func.count())
+        .select_from(Render)
+        .group_by(Render.status)
+        .order_by(Render.status)
+    )
+    return [
+        RenderStatusCount(status=str(status_value), count=int(count_value))
+        for status_value, count_value in result.all()
+    ]
+
+
+async def list_recent_failed_renders(
+    session: AsyncSession,
+    *,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[Render], int]:
+    """Return bounded failed renders ordered by newest update first."""
+    count_stmt = (
+        select(func.count())
+        .select_from(Render)
+        .where(Render.status == RenderStatus.FAILED.value)
+    )
+    count_result = await session.execute(count_stmt)
+    total = count_result.scalar_one()
+
+    query = (
+        select(Render)
+        .where(Render.status == RenderStatus.FAILED.value)
+        .order_by(col(Render.updated_at).desc(), col(Render.created_at).desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await session.execute(query)
+    return list(result.scalars().all()), total
+
+
+async def count_renderer_failures(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[RendererFailureCount]:
+    """Return failed render counts grouped by renderer and error code."""
+    result = await session.execute(
+        select(Render.renderer, Render.error_code, func.count())
+        .select_from(Render)
+        .where(Render.status == RenderStatus.FAILED.value)
+        .group_by(Render.renderer, Render.error_code)
+        .order_by(func.count().desc(), Render.renderer, Render.error_code)
+        .limit(limit)
+    )
+    return [
+        RendererFailureCount(
+            renderer=str(renderer or "unknown"),
+            error_code=str(error_code or "UNKNOWN"),
+            count=int(count_value),
+        )
+        for renderer, error_code, count_value in result.all()
+    ]
+
+
+async def list_queue_wait_samples(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[RenderTimingSample]:
+    """Return recent queue wait samples derived from started_at - created_at."""
+    result = await session.execute(
+        select(Render.id, Render.created_at, Render.started_at)
+        .where(col(Render.started_at).is_not(None))
+        .order_by(col(Render.started_at).desc())
+        .limit(limit)
+    )
+    samples: list[RenderTimingSample] = []
+    for render_id, created_at, started_at in result.all():
+        if started_at is None:
+            continue
+        seconds = max(0.0, (started_at - created_at).total_seconds())
+        samples.append(RenderTimingSample(render_id=str(render_id), seconds=seconds))
+    return samples
+
+
+async def list_render_duration_samples(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[RenderTimingSample]:
+    """Return recent render duration samples derived from completed - started."""
+    result = await session.execute(
+        select(Render.id, Render.started_at, Render.completed_at)
+        .where(col(Render.started_at).is_not(None))
+        .where(col(Render.completed_at).is_not(None))
+        .order_by(col(Render.completed_at).desc())
+        .limit(limit)
+    )
+    samples: list[RenderTimingSample] = []
+    for render_id, started_at, completed_at in result.all():
+        if started_at is None or completed_at is None:
+            continue
+        seconds = max(0.0, (completed_at - started_at).total_seconds())
+        samples.append(RenderTimingSample(render_id=str(render_id), seconds=seconds))
+    return samples
+
+
+async def list_active_render_ids(session: AsyncSession) -> set[str]:
+    """Return render IDs that may still own active workspaces."""
+    active_statuses = [
+        RenderStatus.QUEUED.value,
+        RenderStatus.FETCHING.value,
+        RenderStatus.COMPILING.value,
+        RenderStatus.RENDERING.value,
+        RenderStatus.UPLOADING.value,
+    ]
+    result = await session.execute(
+        select(Render.id).where(col(Render.status).in_(active_statuses))
+    )
+    return {str(render_id) for render_id in result.scalars().all()}
 
 
 async def set_cancel_requested(

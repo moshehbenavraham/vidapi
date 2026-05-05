@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import structlog
+from arq.connections import ArqRedis
 from fastapi import APIRouter, HTTPException, status
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -14,14 +15,18 @@ from app.api.deps import (
     StorageDep,
     TemplateServiceDep,
 )
-from app.api.errors import StorageError
+from app.api.errors import LimitExceededAPIError, QueueSaturatedAPIError, StorageError
+from app.core.config import Settings
 from app.db import render_crud
 from app.db.template_models import TemplateVersion
 from app.models.errors import (
     AUTH_ERROR_RESPONSES,
     CONFLICT_ERROR,
+    LIMIT_ERROR,
     NOT_FOUND_ERROR,
+    QUEUE_SATURATED_ERROR,
     QUEUE_UNAVAILABLE_ERROR,
+    REQUEST_SIZE_ERROR,
     VALIDATION_ERROR,
 )
 from app.models.render import RenderStatus
@@ -35,6 +40,12 @@ from app.models.template import (
     TemplateResponse,
     TemplateVersionResponse,
     UpdateTemplateRequest,
+)
+from app.services.limits import LimitExceededError, validate_composition_limits
+from app.services.queue_admission import (
+    QueueAdmissionUnavailableError,
+    QueueSaturatedError,
+    admit_render_queue,
 )
 from app.services.template_engine import (
     TemplateExpansionError,
@@ -75,15 +86,22 @@ def _build_version_response(version: TemplateVersion) -> TemplateVersionResponse
     status_code=status.HTTP_201_CREATED,
     responses={
         **AUTH_ERROR_RESPONSES,
-        422: VALIDATION_ERROR,
+        413: REQUEST_SIZE_ERROR,
+        422: LIMIT_ERROR,
     },
 )
 async def create_template(
     body: CreateTemplateRequest,
     template_service: TemplateServiceDep,
     session: DBSessionDep,
+    settings: SettingsDep,
 ) -> CreateTemplateResponse:
     """Create a new template with an initial version."""
+    try:
+        validate_composition_limits(body.composition, settings)
+    except LimitExceededError as exc:
+        raise LimitExceededAPIError.from_violation(exc.violation) from exc
+
     template, version = await template_service.create_template(
         session,
         name=body.name,
@@ -194,7 +212,8 @@ async def get_template(
         **AUTH_ERROR_RESPONSES,
         404: NOT_FOUND_ERROR,
         409: CONFLICT_ERROR,
-        422: VALIDATION_ERROR,
+        413: REQUEST_SIZE_ERROR,
+        422: LIMIT_ERROR,
     },
 )
 async def update_template(
@@ -202,8 +221,15 @@ async def update_template(
     body: UpdateTemplateRequest,
     template_service: TemplateServiceDep,
     session: DBSessionDep,
+    settings: SettingsDep,
 ) -> TemplateResponse:
     """Update a template, creating a new immutable version if composition changes."""
+    if body.composition is not None:
+        try:
+            validate_composition_limits(body.composition, settings)
+        except LimitExceededError as exc:
+            raise LimitExceededAPIError.from_violation(exc.violation) from exc
+
     try:
         template, new_version = await template_service.update_template(
             session,
@@ -289,7 +315,9 @@ async def delete_template(
         **AUTH_ERROR_RESPONSES,
         404: NOT_FOUND_ERROR,
         409: CONFLICT_ERROR,
-        422: VALIDATION_ERROR,
+        413: REQUEST_SIZE_ERROR,
+        422: LIMIT_ERROR,
+        429: QUEUE_SATURATED_ERROR,
         503: QUEUE_UNAVAILABLE_ERROR,
     },
 )
@@ -349,6 +377,19 @@ async def render_template(
     if body.callback:
         expanded_dict["callback"] = body.callback
 
+    try:
+        validate_composition_limits(expanded_composition, settings)
+    except LimitExceededError as exc:
+        raise LimitExceededAPIError.from_violation(exc.violation) from exc
+
+    if settings.render_mode == "async":
+        if arq_pool is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Render queue pool not initialized.",
+            )
+        await _admit_queue_or_raise(settings=settings, arq_pool=arq_pool)
+
     render = await render_crud.create_render(
         session,
         template_id=tmpl_id,
@@ -389,11 +430,6 @@ async def render_template(
         ) from exc
 
     if settings.render_mode == "async":
-        if arq_pool is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Render queue pool not initialized.",
-            )
         try:
             await enqueue_render(arq_pool, render_id)
         except (RedisConnectionError, OSError) as exc:
@@ -418,3 +454,23 @@ async def render_template(
         template_version_id=version_id,
         created_at=render.created_at,
     )
+
+
+async def _admit_queue_or_raise(
+    *,
+    settings: Settings,
+    arq_pool: ArqRedis,
+) -> None:
+    try:
+        await admit_render_queue(settings=settings, arq_pool=arq_pool)
+    except QueueSaturatedError as exc:
+        raise QueueSaturatedAPIError(
+            depth=exc.depth,
+            max_depth=exc.max_depth,
+            retry_after=exc.retry_after,
+        ) from exc
+    except QueueAdmissionUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Render queue is unavailable. Please retry later.",
+        ) from exc

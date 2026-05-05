@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -16,6 +18,23 @@ PRESERVE_ON_FAILURE = {
     "logs.txt",
     "compiled.editly.json",
 }
+
+
+@dataclass(frozen=True)
+class OrphanCleanupResult:
+    scanned: int = 0
+    removed: int = 0
+    skipped_active: int = 0
+    skipped_young: int = 0
+    skipped_unsafe: int = 0
+    bytes_removed: int = 0
+
+
+@dataclass(frozen=True)
+class _WorkspaceCandidate:
+    path: Path
+    mtime: float
+    bytes_used: int
 
 
 class WorkspaceManager:
@@ -98,3 +117,118 @@ class WorkspaceManager:
                 path=str(workspace),
                 error=str(exc),
             )
+
+    async def cleanup_orphans(
+        self,
+        active_render_ids: set[str],
+        *,
+        now: float | None = None,
+    ) -> OrphanCleanupResult:
+        """Remove stale inactive workspaces under the configured root."""
+        settings = get_settings()
+        if not settings.workspace_cleanup_enabled:
+            await logger.ainfo("workspace_orphan_cleanup_skipped_disabled")
+            return OrphanCleanupResult()
+
+        if now is None:
+            now = time.time()
+
+        await asyncio.to_thread(self._root.mkdir, parents=True, exist_ok=True)
+        root = self._root.resolve()
+        ttl = settings.workspace_orphan_ttl_seconds
+
+        scanned = 0
+        skipped_active = 0
+        skipped_young = 0
+        skipped_unsafe = 0
+        candidates: list[_WorkspaceCandidate] = []
+
+        entries = await asyncio.to_thread(list, root.iterdir())
+        for entry in entries:
+            scanned += 1
+            if entry.name in active_render_ids:
+                skipped_active += 1
+                continue
+            if entry.is_symlink() or not entry.is_dir():
+                skipped_unsafe += 1
+                continue
+
+            resolved = entry.resolve()
+            if not _is_subpath(resolved, root):
+                skipped_unsafe += 1
+                continue
+
+            try:
+                stat_result = await asyncio.to_thread(entry.stat, follow_symlinks=False)
+            except OSError:
+                skipped_unsafe += 1
+                continue
+
+            age_seconds = now - stat_result.st_mtime
+            if age_seconds < ttl:
+                skipped_young += 1
+                continue
+
+            bytes_used = await asyncio.to_thread(_directory_size, entry)
+            candidates.append(
+                _WorkspaceCandidate(
+                    path=entry,
+                    mtime=stat_result.st_mtime,
+                    bytes_used=bytes_used,
+                )
+            )
+
+        candidates.sort(key=lambda candidate: candidate.mtime)
+        removed = 0
+        bytes_removed = 0
+        for candidate in candidates:
+            await asyncio.to_thread(shutil.rmtree, candidate.path, ignore_errors=True)
+            removed += 1
+            bytes_removed += candidate.bytes_used
+
+        result = OrphanCleanupResult(
+            scanned=scanned,
+            removed=removed,
+            skipped_active=skipped_active,
+            skipped_young=skipped_young,
+            skipped_unsafe=skipped_unsafe,
+            bytes_removed=bytes_removed,
+        )
+        await logger.ainfo(
+            "workspace_orphan_cleanup_complete",
+            scanned=result.scanned,
+            removed=result.removed,
+            skipped_active=result.skipped_active,
+            skipped_young=result.skipped_young,
+            skipped_unsafe=result.skipped_unsafe,
+            bytes_removed=result.bytes_removed,
+            disk_budget_bytes=settings.workspace_disk_budget_bytes,
+        )
+        return result
+
+
+def _is_subpath(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            for entry in current.iterdir():
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir():
+                    stack.append(entry)
+                    continue
+                if entry.is_file():
+                    total += entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            continue
+    return total

@@ -917,7 +917,7 @@ class EditlyRenderer:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
-                stdout=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(compiled.workspace),
             )
@@ -954,6 +954,7 @@ class EditlyRenderer:
 
         elapsed = time.monotonic() - start_time
         stderr_text = "\n".join(stderr_lines)
+        stderr_text = stderr_text[-self._settings.max_subprocess_stderr_bytes :]
 
         log_path.write_text(stderr_text, encoding="utf-8")
 
@@ -1047,6 +1048,8 @@ class EditlyRenderer:
     ) -> list[str]:
         """Read stderr line-by-line, invoking callbacks as appropriate."""
         lines: list[str] = []
+        line_bytes_total = 0
+        max_bytes = self._settings.max_subprocess_stderr_bytes
         assert proc.stderr is not None
 
         while True:
@@ -1056,6 +1059,10 @@ class EditlyRenderer:
 
             line = line_bytes.decode(errors="replace").rstrip("\n").rstrip("\r")
             lines.append(line)
+            line_bytes_total += len(line.encode("utf-8", errors="replace")) + 1
+            while line_bytes_total > max_bytes and lines:
+                removed = lines.pop(0)
+                line_bytes_total -= len(removed.encode("utf-8", errors="replace")) + 1
 
             if progress_callback is not None:
                 with contextlib.suppress(Exception):
@@ -1077,17 +1084,22 @@ class EditlyRenderer:
     async def _terminate_process(
         self,
         proc: asyncio.subprocess.Process,
-        grace_period: float = 5.0,
+        grace_period: float | None = None,
     ) -> None:
         """SIGTERM with grace period, then SIGKILL if still alive."""
         if proc.returncode is not None:
             return
 
-        proc.terminate()
+        if grace_period is None:
+            grace_period = self._settings.subprocess_kill_grace_seconds
+
+        with contextlib.suppress(ProcessLookupError):
+            proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=grace_period)
         except TimeoutError:
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
             await proc.wait()
 
 

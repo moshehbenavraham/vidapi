@@ -31,14 +31,16 @@ class MediaInfo:
 async def probe(
     file_path: Path,
     *,
+    ffprobe_bin: str = "ffprobe",
     timeout_seconds: int = 30,
+    kill_grace_seconds: float = 5.0,
 ) -> MediaInfo:
     """Run ffprobe on a file and return parsed metadata.
 
     Uses ``asyncio.create_subprocess_exec`` for non-blocking I/O.
     """
     cmd = [
-        "ffprobe",
+        ffprobe_bin,
         "-v",
         "quiet",
         "-print_format",
@@ -59,8 +61,7 @@ async def probe(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        await _terminate_process(proc, kill_grace_seconds)
         logger.error("ffprobe_timeout", path=str(file_path))
         raise FFProbeError(
             f"ffprobe timed out after {timeout_seconds}s for {file_path}"
@@ -86,6 +87,22 @@ async def probe(
         raise FFProbeError(f"Failed to parse ffprobe JSON output: {exc}") from exc
 
     return _parse_probe_output(data)
+
+
+async def _terminate_process(
+    proc: asyncio.subprocess.Process,
+    grace_period: float,
+) -> None:
+    if proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_period)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
 
 
 def _parse_probe_output(data: dict[str, object]) -> MediaInfo:

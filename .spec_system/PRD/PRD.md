@@ -1040,7 +1040,7 @@ This system delivers the product via phases. Each phase is implemented via multi
 | 00 | Foundation | 5 | Complete (5/5) |
 | 01 | Async Jobs and Multi-track | 5 | Complete (5/5) |
 | 02 | Templates and Polish | 5 | Complete (5/5) |
-| 03 | Production Hardening | 5 | In Progress (1/5) |
+| 03 | Production Hardening | 5 | Complete (5/5) |
 | 04 | Advanced Rendering | TBD | Not Started |
 
 ## Phase 00: Foundation
@@ -1164,6 +1164,8 @@ Make the service safe and operable outside local development.
 - Admin/list endpoints for operational visibility.
 - Structured logs and basic metrics.
 
+This phase is complete. Archived session artifacts live in `.spec_system/archive/phases/phase_03/`.
+
 ### Exit Criteria
 
 - Docker Compose can run API, worker, Redis, Postgres, and MinIO.
@@ -1180,7 +1182,7 @@ Make the service safe and operable outside local development.
 | 04 | Limits, Resource Controls, and Asset Security Hardening | ~20 |
 | 05 | Operational Visibility and Production Stack | ~20 |
 
-Session stubs: `.spec_system/PRD/phase_03/`
+Archived phase artifacts: `.spec_system/archive/phases/phase_03/`
 
 ## Phase 04: Advanced Rendering
 

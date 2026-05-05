@@ -311,13 +311,19 @@ async def _execute_pipeline(
         # Stage 1: FETCHING - validate and expand
         await _checkpoint()
         async with session_factory() as session:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.FETCHING,
                 stage="validating",
                 progress=5,
             )
+        await _log_stage_transition(
+            updated_render,
+            status=RenderStatus.FETCHING,
+            stage="validating",
+            progress=5,
+        )
         log_collector.add("fetching", "Status -> FETCHING")
 
         async with session_factory() as session:
@@ -329,13 +335,19 @@ async def _execute_pipeline(
         # Stage 2: COMPILING - resolve assets and compile
         await _checkpoint()
         async with session_factory() as session:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.COMPILING,
                 stage="resolving_assets",
                 progress=20,
             )
+        await _log_stage_transition(
+            updated_render,
+            status=RenderStatus.COMPILING,
+            stage="resolving_assets",
+            progress=20,
+        )
         log_collector.add("compiling", "Status -> COMPILING")
 
         async with session_factory() as session:
@@ -347,13 +359,19 @@ async def _execute_pipeline(
         # Stage 3: RENDERING - render video and store artifacts
         await _checkpoint()
         async with session_factory() as session:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.RENDERING,
                 stage="rendering",
                 progress=30,
             )
+        await _log_stage_transition(
+            updated_render,
+            status=RenderStatus.RENDERING,
+            stage="rendering",
+            progress=30,
+        )
         log_collector.add("rendering", "Status -> RENDERING")
 
         # Compute total duration for progress percentage
@@ -383,23 +401,35 @@ async def _execute_pipeline(
         # Stage 4: UPLOADING -> SUCCEEDED
         await _checkpoint()
         async with session_factory() as session:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.UPLOADING,
                 stage="finalizing",
                 progress=90,
             )
+        await _log_stage_transition(
+            updated_render,
+            status=RenderStatus.UPLOADING,
+            stage="finalizing",
+            progress=90,
+        )
         log_collector.add("uploading", "Status -> UPLOADING")
 
         async with session_factory() as session:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.SUCCEEDED,
                 stage="complete",
                 progress=100,
             )
+        await _log_stage_transition(
+            updated_render,
+            status=RenderStatus.SUCCEEDED,
+            stage="complete",
+            progress=100,
+        )
         log_collector.add("complete", "Status -> SUCCEEDED")
 
         _fire_webhook(session_factory, render_id, "render.succeeded")
@@ -430,6 +460,35 @@ def _fire_webhook(
     )
     _webhook_tasks.add(task)
     task.add_done_callback(_webhook_tasks.discard)
+
+
+async def _log_stage_transition(
+    render: Any,
+    *,
+    status: RenderStatus,
+    stage: str,
+    progress: int,
+) -> None:
+    if render is None:
+        return
+
+    fields: dict[str, Any] = {
+        "render_id": render.id,
+        "status": status.value,
+        "stage": stage,
+        "progress": progress,
+    }
+    if render.started_at is not None:
+        fields["queue_wait_seconds"] = _seconds_between(
+            render.created_at,
+            render.started_at,
+        )
+    if render.started_at is not None and render.completed_at is not None:
+        fields["render_duration_seconds"] = _seconds_between(
+            render.started_at,
+            render.completed_at,
+        )
+    await logger.ainfo("worker_stage_transition", **fields)
 
 
 class _PipelineCancelledError(Exception):
@@ -466,8 +525,9 @@ async def _mark_failed(
 
     async with session_factory() as session:
         render = await render_crud.get_render_by_id(session, render_id)
+        updated_render = render
         if render is not None and not RenderStatus(render.status).is_terminal:
-            await render_crud.update_render_status(
+            updated_render = await render_crud.update_render_status(
                 session,
                 render_id,
                 RenderStatus.FAILED,
@@ -481,13 +541,28 @@ async def _mark_failed(
     await logger.aerror(
         "worker_task_failed",
         render_id=render_id,
+        status=RenderStatus.FAILED.value,
+        stage="failed",
         error_code=error_code.value,
+        render_duration_seconds=_render_duration_seconds(updated_render),
     )
 
 
 async def enqueue_render(pool: ArqRedis, render_id: str) -> None:
     """Enqueue a render job to ARQ for async processing."""
     await pool.enqueue_job("run_render", render_id)
+
+
+def _seconds_between(start: Any, end: Any) -> float:
+    return round(max(0.0, (end - start).total_seconds()), 3)
+
+
+def _render_duration_seconds(render: Any) -> float | None:
+    if render is None:
+        return None
+    if render.started_at is None or render.completed_at is None:
+        return None
+    return _seconds_between(render.started_at, render.completed_at)
 
 
 async def worker_startup(ctx: dict[str, Any]) -> None:
@@ -515,6 +590,13 @@ async def worker_startup(ctx: dict[str, Any]) -> None:
     ctx["session_factory"] = _make_session_context_manager(engine)
     ctx["render_service"] = render_service
     ctx["workspace_manager"] = workspace_mgr
+
+    try:
+        async with ctx["session_factory"]() as session:
+            active_render_ids = await render_crud.list_active_render_ids(session)
+        await workspace_mgr.cleanup_orphans(active_render_ids)
+    except Exception as exc:
+        await logger.awarning("workspace_orphan_cleanup_failed", error=str(exc))
 
     await logger.ainfo("worker_started")
 

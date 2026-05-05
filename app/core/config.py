@@ -82,6 +82,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     app_name: str = "VidAPI"
@@ -97,6 +98,9 @@ class Settings(BaseSettings):
     database_connect_retry_backoff_seconds: float = Field(default=0.5, gt=0.0)
 
     redis_url: str = "redis://localhost:6379"
+    redis_queue_name: str = "arq:queue"
+    redis_require_auth_in_production: bool = True
+    redis_require_tls_in_production: bool = True
     render_mode: Literal["sync", "async"] = "sync"
 
     api_key_auth_enabled: bool = False
@@ -140,16 +144,40 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8000",
     ]
 
-    max_render_duration_seconds: int = 120
-    max_output_width: int = 1920
-    max_output_height: int = 1920
-    max_fps: int = 60
-    max_clips_per_render: int = 50
-    max_tracks_per_render: int = 10
-    max_asset_size_mb: int = 500
-    render_timeout_seconds: int = 600
+    max_request_body_bytes: int = Field(
+        default=2_097_152,
+        ge=1,
+        le=104_857_600,
+    )
+    max_render_request_body_bytes: int = Field(
+        default=2_097_152,
+        ge=1,
+        le=104_857_600,
+    )
+    max_template_request_body_bytes: int = Field(
+        default=2_097_152,
+        ge=1,
+        le=104_857_600,
+    )
+    max_render_duration_seconds: int = Field(default=120, ge=1, le=86_400)
+    max_output_width: int = Field(default=1920, ge=1, le=16_384)
+    max_output_height: int = Field(default=1920, ge=1, le=16_384)
+    max_fps: int = Field(default=60, ge=1, le=240)
+    max_clips_per_render: int = Field(default=50, ge=1, le=10_000)
+    max_tracks_per_render: int = Field(default=50, ge=1, le=1_000)
+    max_assets_per_render: int = Field(default=100, ge=1, le=10_000)
+    max_asset_size_mb: int = Field(default=500, ge=1, le=10_240)
+    max_media_duration_seconds: int = Field(default=600, ge=1, le=86_400)
+    max_media_width: int = Field(default=3840, ge=1, le=16_384)
+    max_media_height: int = Field(default=3840, ge=1, le=16_384)
+    max_media_streams_per_asset: int = Field(default=8, ge=1, le=128)
+    max_async_queue_depth: int = Field(default=1000, ge=0, le=1_000_000)
+    queue_admission_timeout_seconds: float = Field(default=1.0, gt=0.0, le=30.0)
+    queue_retry_after_seconds: int = Field(default=10, ge=1, le=3600)
+    render_timeout_seconds: int = Field(default=600, ge=1, le=86_400)
 
     asset_download_timeout_seconds: int = 60
+    asset_max_redirects: int = Field(default=5, ge=0, le=10)
     asset_allow_http: bool = False
     asset_mime_allowlist: list[str] = [
         "image/jpeg",
@@ -172,19 +200,31 @@ class Settings(BaseSettings):
         "/usr/share/fonts/truetype/dejavu",
         "/usr/share/fonts",
     ]
-    ffprobe_timeout_seconds: int = 30
+    ffprobe_bin: str = "ffprobe"
+    ffprobe_timeout_seconds: int = Field(default=30, ge=1, le=3600)
 
     workspace_cleanup_enabled: bool = True
     workspace_cleanup_keep_on_failure: bool = True
+    workspace_orphan_ttl_seconds: int = Field(default=86_400, ge=0, le=31_536_000)
+    workspace_disk_budget_bytes: int | None = Field(
+        default=None,
+        ge=0,
+    )
 
     editly_bin: str = "editly"
-    editly_timeout_seconds: int = 600
+    editly_timeout_seconds: int = Field(default=600, ge=1, le=86_400)
     editly_fast_mode: bool = False
 
     ffmpeg_bin: str = "ffmpeg"
-    audio_mix_timeout_seconds: int = 120
+    audio_mix_timeout_seconds: int = Field(default=120, ge=1, le=3600)
     audio_normalization_enabled: bool = False
     audio_fade_duration_seconds: float = Field(default=1.0, gt=0.0)
+    subprocess_kill_grace_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    max_subprocess_stderr_bytes: int = Field(
+        default=1_048_576,
+        ge=4096,
+        le=16_777_216,
+    )
 
     progress_update_interval_seconds: float = 2.0
 
@@ -196,7 +236,7 @@ class Settings(BaseSettings):
     poster_timestamp_percent: float = 0.25
     poster_format: str = "jpg"
     poster_quality: int = 85
-    poster_timeout_seconds: int = 30
+    poster_timeout_seconds: int = Field(default=30, ge=1, le=3600)
 
     webhook_secret: str = ""
     webhook_timeout_seconds: int = 10
@@ -301,6 +341,30 @@ class Settings(BaseSettings):
             )
 
         _validate_url_has_no_credentials("S3_ENDPOINT_URL", self.s3_endpoint_url)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_redis_settings(self) -> Self:
+        parsed = urlsplit(self.redis_url)
+        if parsed.scheme not in {"redis", "rediss", "unix"}:
+            msg = "REDIS_URL must use redis://, rediss://, or unix://"
+            raise ValueError(msg)
+
+        if self.environment == "production" and self.render_mode == "async":
+            if self.redis_require_tls_in_production and parsed.scheme != "rediss":
+                msg = (
+                    "ENVIRONMENT=production with RENDER_MODE=async requires "
+                    "a rediss:// REDIS_URL unless "
+                    "REDIS_REQUIRE_TLS_IN_PRODUCTION=false"
+                )
+                raise ValueError(msg)
+            if self.redis_require_auth_in_production and not parsed.password:
+                msg = (
+                    "ENVIRONMENT=production with RENDER_MODE=async requires "
+                    "REDIS_URL credentials unless "
+                    "REDIS_REQUIRE_AUTH_IN_PRODUCTION=false"
+                )
+                raise ValueError(msg)
         return self
 
 

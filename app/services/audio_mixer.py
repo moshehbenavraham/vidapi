@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -225,8 +226,7 @@ async def mix_audio(
                 timeout=settings.audio_mix_timeout_seconds,
             )
         except TimeoutError as err:
-            proc.kill()
-            await proc.wait()
+            await _terminate_process(proc, settings.subprocess_kill_grace_seconds)
             raise AudioMixError(
                 f"Audio mixing timed out after {settings.audio_mix_timeout_seconds}s",
                 exit_code=proc.returncode,
@@ -239,19 +239,20 @@ async def mix_audio(
         ) from err
 
     stderr_text = stderr.decode(errors="replace") if stderr else ""
+    stderr_text = stderr_text[-settings.max_subprocess_stderr_bytes :]
 
     if proc.returncode != 0:
         raise AudioMixError(
             f"FFmpeg exited with code {proc.returncode}",
             exit_code=proc.returncode,
-            stderr=stderr_text[-2000:],
+            stderr=stderr_text,
         )
 
     if not output_path.is_file():
         raise AudioMixError(
             "FFmpeg completed but output file not found",
             exit_code=proc.returncode,
-            stderr=stderr_text[-2000:],
+            stderr=stderr_text,
         )
 
     logger.info(
@@ -260,3 +261,19 @@ async def mix_audio(
     )
 
     return output_path
+
+
+async def _terminate_process(
+    proc: asyncio.subprocess.Process,
+    grace_period: float,
+) -> None:
+    if proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_period)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()

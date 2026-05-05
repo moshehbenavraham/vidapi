@@ -14,15 +14,18 @@ from app.api.deps import (
     StorageDep,
     StorageUrlResolverDep,
 )
-from app.api.errors import StorageError
+from app.api.errors import LimitExceededAPIError, QueueSaturatedAPIError, StorageError
+from app.core.config import Settings
 from app.db import render_crud
 from app.models.composition import Composition
 from app.models.errors import (
     AUTH_ERROR_RESPONSES,
     CONFLICT_ERROR,
+    LIMIT_ERROR,
     NOT_FOUND_ERROR,
+    QUEUE_SATURATED_ERROR,
     QUEUE_UNAVAILABLE_ERROR,
-    RATE_LIMIT_ERROR,
+    REQUEST_SIZE_ERROR,
     VALIDATION_ERROR,
 )
 from app.models.render import (
@@ -34,6 +37,12 @@ from app.models.render import (
 )
 from app.models.render import (
     RenderError as RenderErrorModel,
+)
+from app.services.limits import LimitExceededError, validate_composition_limits
+from app.services.queue_admission import (
+    QueueAdmissionUnavailableError,
+    QueueSaturatedError,
+    admit_render_queue,
 )
 from app.storage.base import ArtifactType, artifact_media_type
 from app.workers.render_worker import enqueue_render
@@ -49,8 +58,9 @@ router = APIRouter(tags=["renders"])
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         **AUTH_ERROR_RESPONSES,
-        422: VALIDATION_ERROR,
-        429: RATE_LIMIT_ERROR,
+        413: REQUEST_SIZE_ERROR,
+        422: LIMIT_ERROR,
+        429: QUEUE_SATURATED_ERROR,
         503: QUEUE_UNAVAILABLE_ERROR,
     },
 )
@@ -68,14 +78,40 @@ async def create_render(
     enqueues to ARQ, and returns 202 immediately.
     When RENDER_MODE=sync, executes the full pipeline inline (dev/test).
     """
+    try:
+        validate_composition_limits(composition, settings)
+    except LimitExceededError as exc:
+        raise LimitExceededAPIError.from_violation(exc.violation) from exc
+
     if settings.render_mode == "async":
         if arq_pool is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Render queue pool not initialized.",
             )
+        await _admit_queue_or_raise(settings=settings, arq_pool=arq_pool)
         return await _create_render_async(composition, session, arq_pool, storage)
     return await _create_render_sync(composition, render_service, session)
+
+
+async def _admit_queue_or_raise(
+    *,
+    settings: Settings,
+    arq_pool: ArqRedis,
+) -> None:
+    try:
+        await admit_render_queue(settings=settings, arq_pool=arq_pool)
+    except QueueSaturatedError as exc:
+        raise QueueSaturatedAPIError(
+            depth=exc.depth,
+            max_depth=exc.max_depth,
+            retry_after=exc.retry_after,
+        ) from exc
+    except QueueAdmissionUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Render queue is unavailable. Please retry later.",
+        ) from exc
 
 
 async def _create_render_async(

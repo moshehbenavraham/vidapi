@@ -1,0 +1,134 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    user: "1000:1000"
+    env_file:
+      - .env.production.example
+    environment:
+      API_HEALTH_URL: http://api:8000/v1/health
+    ports:
+      - "8000:8000"
+    volumes:
+      - api-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - vidapi-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    user: "1000:1000"
+    env_file:
+      - .env.production.example
+    environment:
+      API_HEALTH_URL: http://api:8000/v1/health
+    volumes:
+      - worker-data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - vidapi-prod
+    healthcheck:
+      test: ["CMD", "bash", "/usr/local/bin/worker-healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vidapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-vidapi}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - vidapi-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - sh
+      - -c
+      - redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me-redis}
+    volumes:
+      - redis-data:/data
+    networks:
+      - vidapi-prod
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vidapi-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-minio}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - vidapi-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  vidapi-prod:
+    driver: bridge
+
+volumes:
+  api-data:
+  worker-data:
+  postgres-data:
+  redis-data:
+  minio-data:

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
 
+from app.services.ffprobe import FFProbeError, MediaInfo, probe
 from app.services.ssrf import SSRFValidationError, validate_url
 
 
@@ -252,3 +257,122 @@ class TestFileAssetAllowlist:
 
         with pytest.raises(AssetFileError, match="not found"):
             await svc._resolve_file("file:///nonexistent/file.mp4")
+
+
+class TestAssetRedirectRegression:
+    @pytest.mark.asyncio
+    async def test_redirect_to_blocked_network_is_rejected(self) -> None:
+        from app.core.config import Settings
+        from app.services.asset_service import AssetService
+
+        class _RedirectResponse:
+            is_redirect = True
+
+            def __init__(self) -> None:
+                self.headers = {"location": "http://127.0.0.1/private.mp4"}
+
+        class _Client:
+            async def get(self, url: str) -> _RedirectResponse:
+                return _RedirectResponse()
+
+        settings = Settings(asset_allow_http=True)
+        svc = AssetService(settings=settings)
+
+        with pytest.raises(SSRFValidationError):
+            await svc._download_with_redirects(
+                _Client(),
+                "https://example.com/start.mp4",
+            )
+
+
+class TestMediaMetadataLimits:
+    @pytest.mark.asyncio
+    async def test_file_media_duration_limit_rejected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.api.errors import MediaLimitError
+        from app.core.config import Settings
+        from app.services.asset_service import AssetService
+
+        asset_path = tmp_path / "clip.mp4"
+        asset_path.write_bytes(b"media")
+        monkeypatch.setattr(
+            "app.services.asset_service.probe",
+            AsyncMock(
+                return_value=MediaInfo(
+                    duration=20.0,
+                    width=1920,
+                    height=1080,
+                    video_codec="h264",
+                    audio_codec="aac",
+                    stream_count=2,
+                    format_name="mov,mp4",
+                )
+            ),
+        )
+
+        settings = Settings(
+            allowed_asset_dirs=[str(tmp_path)],
+            max_media_duration_seconds=10,
+        )
+        svc = AssetService(settings=settings)
+
+        with pytest.raises(MediaLimitError) as exc_info:
+            await svc._resolve_file(f"file://{asset_path}")
+
+        assert exc_info.value.error_code == "MEDIA_LIMIT_EXCEEDED"
+        assert exc_info.value.context["field"] == "media.duration"
+
+
+class TestSubprocessTimeouts:
+    @pytest.mark.asyncio
+    async def test_ffprobe_timeout_terminates_process(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class _FakeProcess:
+            def __init__(self) -> None:
+                self.returncode: int | None = None
+                self.terminated = False
+                self.killed = False
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                await asyncio.sleep(10)
+                return b"{}", b""
+
+            def terminate(self) -> None:
+                self.terminated = True
+                self.returncode = -15
+
+            def kill(self) -> None:
+                self.killed = True
+                self.returncode = -9
+
+            async def wait(self) -> int:
+                if self.returncode is None:
+                    self.returncode = 0
+                return self.returncode
+
+        fake_proc = _FakeProcess()
+
+        async def _fake_create_subprocess_exec(
+            *args: object, **kwargs: object
+        ) -> object:
+            return fake_proc
+
+        monkeypatch.setattr(
+            "app.services.ffprobe.asyncio.create_subprocess_exec",
+            _fake_create_subprocess_exec,
+        )
+
+        with pytest.raises(FFProbeError, match="timed out"):
+            await probe(
+                tmp_path / "clip.mp4",
+                timeout_seconds=0.01,
+                kill_grace_seconds=0.01,
+            )
+
+        assert fake_proc.terminated is True

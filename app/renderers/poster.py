@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 import structlog
@@ -49,6 +50,7 @@ async def generate_poster(
         output_path=output_path,
         seek_seconds=seek_seconds,
         quality=settings.poster_quality,
+        ffmpeg_bin=settings.ffmpeg_bin,
     )
 
     try:
@@ -62,8 +64,7 @@ async def generate_poster(
             timeout=settings.poster_timeout_seconds,
         )
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        await _terminate_process(proc, settings.subprocess_kill_grace_seconds)
         raise PosterError(
             f"Poster generation timed out after {settings.poster_timeout_seconds}s"
         ) from None
@@ -95,10 +96,11 @@ def build_poster_command(
     output_path: Path,
     seek_seconds: float,
     quality: int = 85,
+    ffmpeg_bin: str = "ffmpeg",
 ) -> list[str]:
     """Build the FFmpeg command for frame extraction."""
     return [
-        "ffmpeg",
+        ffmpeg_bin,
         "-y",
         "-ss",
         f"{seek_seconds:.3f}",
@@ -110,3 +112,19 @@ def build_poster_command(
         str(max(1, min(31, (100 - quality) * 31 // 100 + 1))),
         str(output_path),
     ]
+
+
+async def _terminate_process(
+    proc: asyncio.subprocess.Process,
+    grace_period: float,
+) -> None:
+    if proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_period)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()

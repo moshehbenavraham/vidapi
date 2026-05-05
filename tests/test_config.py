@@ -49,6 +49,12 @@ def test_env_var_override() -> None:
         assert settings.debug is True
 
 
+def test_settings_ignore_service_level_env_vars() -> None:
+    with patch.dict(os.environ, {"POSTGRES_USER": "vidapi"}, clear=False):
+        settings = Settings()
+        assert settings.app_name == "VidAPI"
+
+
 def test_log_level_override() -> None:
     with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
         settings = Settings()

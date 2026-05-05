@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -118,6 +120,67 @@ class TestWorkspaceCleanupFailure:
         mgr = WorkspaceManager(workspace_root=tmp_path)
         ws = tmp_path / "nonexistent"
         await mgr.cleanup_failure(ws)
+
+
+class TestWorkspaceOrphanCleanup:
+    @pytest.mark.asyncio
+    async def test_cleanup_orphans_removes_stale_inactive_only(self, tmp_path: Path):
+        """cleanup_orphans removes stale inactive workspaces only."""
+        mgr = WorkspaceManager(workspace_root=tmp_path)
+        stale = tmp_path / "render_stale"
+        active = tmp_path / "render_active"
+        young = tmp_path / "render_young"
+        stale.mkdir()
+        active.mkdir()
+        young.mkdir()
+        (stale / "chunk.bin").write_bytes(b"x" * 10)
+
+        now = time.time()
+        old_mtime = now - 3600
+        os.utime(stale, (old_mtime, old_mtime))
+        os.utime(active, (old_mtime, old_mtime))
+
+        with patch("app.workers.workspace.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.workspace_cleanup_enabled = True
+            settings.workspace_orphan_ttl_seconds = 60
+            settings.workspace_disk_budget_bytes = None
+            mock_settings.return_value = settings
+
+            result = await mgr.cleanup_orphans({"render_active"}, now=now)
+
+        assert result.removed == 1
+        assert result.skipped_active == 1
+        assert result.skipped_young == 1
+        assert result.bytes_removed == 10
+        assert not stale.exists()
+        assert active.exists()
+        assert young.exists()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphans_skips_symlinks(self, tmp_path: Path):
+        """cleanup_orphans never follows symlinks under the workspace root."""
+        root = tmp_path / "root"
+        root.mkdir()
+        mgr = WorkspaceManager(workspace_root=root)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        link = root / "render_link"
+        link.symlink_to(outside, target_is_directory=True)
+
+        with patch("app.workers.workspace.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.workspace_cleanup_enabled = True
+            settings.workspace_orphan_ttl_seconds = 0
+            settings.workspace_disk_budget_bytes = None
+            mock_settings.return_value = settings
+
+            result = await mgr.cleanup_orphans(set(), now=time.time())
+
+        assert result.removed == 0
+        assert result.skipped_unsafe == 1
+        assert link.exists()
+        assert outside.exists()
 
 
 # ---------------------------------------------------------------------------

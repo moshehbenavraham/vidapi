@@ -62,6 +62,18 @@ RATE_LIMIT_ERROR = documented_error(
     "Rate limit exceeded.",
     RateLimitErrorResponse,
 )
+REQUEST_SIZE_ERROR = documented_error(
+    "Request body exceeds configured size limits.",
+    ErrorResponse,
+)
+LIMIT_ERROR = documented_error(
+    "Request exceeds configured render resource limits.",
+    ErrorResponse,
+)
+QUEUE_SATURATED_ERROR = documented_error(
+    "Render queue is at configured capacity.",
+    ErrorResponse,
+)
 QUEUE_UNAVAILABLE_ERROR = documented_error(
     "Render queue is unavailable.",
     DetailErrorResponse,
@@ -85,4 +97,11 @@ AUTHORIZATION_ERROR = documented_error(
 AUTH_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: AUTHENTICATION_ERROR,
     403: AUTHORIZATION_ERROR,
+}
+OPS_UNAVAILABLE_ERROR = documented_error(
+    "Operational data is temporarily unavailable.",
+    DetailErrorResponse,
+)
+OPS_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    503: OPS_UNAVAILABLE_ERROR,
 }
