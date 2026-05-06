@@ -152,9 +152,6 @@ these production boundaries:
 - There is no committed VPS-specific backup, restore, or rollback runbook yet.
 - The health endpoint returns service health details but should still be exposed
   through TLS and rate-limited at the proxy if public.
-- The running API currently reports application version `0.1.33`; the repository
-  has since been bumped and pushed to `0.1.35`, so the next maintenance deploy
-  should rebuild and replace the API and worker images from current `main`.
 
 ## Resolved Decisions For This VPS
 
@@ -181,15 +178,13 @@ these production boundaries:
 ## Proposed Next Step
 
 Create a VPS runbook that covers authenticated smoke testing, backup and restore,
-rollback, image rebuild/redeploy, and API key rotation. Then rebuild and replace
-the running API and worker images from current `main` so the live service reports
-the repository version `0.1.35`.
+rollback, image rebuild/redeploy, and API key rotation.
 
 ## VPS Implementation Status
 
 Updated: 2026-05-06
 
-Last verified: 2026-05-06 17:24 UTC
+Last verified: 2026-05-06 18:50 UTC
 
 Completed on this VPS:
 
@@ -215,11 +210,13 @@ Completed on this VPS:
   and MinIO.
 - Committed and pushed the deployment support changes to `origin/main` as
   `b679d7e Prepare VPS deployment support`.
-- Bumped repository metadata during bring-up to version `0.1.34`; the current
-  source metadata is `0.1.35`.
+- Bumped repository metadata during bring-up to version `0.1.34`; source
+  metadata has since been bumped to `0.1.36`.
 - Installed `uv` and `uvx` version `0.11.9` under
   `/home/vidapi/.npm-global/bin` so `scripts/dev.sh test ...` works on this
   server.
+- Rebuilt and recreated the API and worker images from current `main` with
+  package version `0.1.35`.
 
 Current state:
 
@@ -238,6 +235,7 @@ Current state:
   `vidapi-minio`) so service discovery cannot collide with Coolify services that
   use generic names on the proxy network.
 - Public `/v1/health` returns healthy database and Redis status.
+- Public `/v1/health` reports application version `0.1.35`.
 - Authenticated `/v1/ops/metrics` returns Prometheus text over HTTPS.
 - Unauthenticated `/v1/ops/metrics` returns `401`.
 - Authenticated `/v1/renders` returns the existing successful smoke render.
@@ -251,9 +249,6 @@ Current state:
   `NOAUTH`, while authenticated ping returns `PONG`.
 - The MinIO bucket `vidapi-renders` exists, is private, and currently contains
   the smoke render artifacts.
-- The running public health response reports application version `0.1.33`; the
-  source tree is now at `0.1.35`, so the running images predate the latest
-  version bump.
 
 Production fix applied during bring-up:
 
@@ -263,6 +258,14 @@ Production fix applied during bring-up:
   datetimes consistently with the existing schema.
 - API startup logging no longer emits the full Redis URL with credentials; it
   logs only the Redis scheme, host, port, and DB number.
+- The application version default now comes from local `pyproject.toml` or
+  installed package metadata. The live VPS `.env.production` has
+  `APP_VERSION=0.1.35`, matching the currently deployed API and worker images.
+- The API and worker Dockerfiles disable standard pip root-user and version
+  check notices during image builds.
+- The worker image now creates `/tmp/.X11-unix` with sticky `1777` permissions
+  before switching to the non-root `vidapi` user, so Xvfb no longer needs to
+  create that directory at runtime.
 
 Verification commands run on 2026-05-06:
 

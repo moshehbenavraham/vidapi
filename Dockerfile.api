@@ -1,5 +1,10 @@
 FROM python:3.11-slim AS runtime
 
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*

@@ -1,5 +1,7 @@
 FROM node:22-slim AS node-base
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -20,6 +22,11 @@ RUN npm install -g editly hyperframes
 
 
 FROM python:3.11-slim AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -83,7 +90,9 @@ COPY scripts/worker-healthcheck.sh /usr/local/bin/worker-healthcheck.sh
 COPY scripts/worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
 RUN chmod +x /usr/local/bin/worker-healthcheck.sh /usr/local/bin/worker-entrypoint.sh
 
-RUN mkdir -p /app/data && chown -R vidapi:vidapi /app
+RUN mkdir -p /app/data /tmp/.X11-unix \
+    && chmod 1777 /tmp/.X11-unix \
+    && chown -R vidapi:vidapi /app
 
 USER vidapi
 

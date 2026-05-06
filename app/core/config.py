@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
@@ -25,6 +27,22 @@ POSTGRESQL_DRIVER_NAMES = frozenset(
 SUPPORTED_DATABASE_DRIVER_NAMES = SQLITE_DRIVER_NAMES | POSTGRESQL_DRIVER_NAMES
 StorageBackendName = Literal["local", "s3"]
 StorageUrlModeName = Literal["proxy", "signed", "public"]
+
+
+def _default_app_version() -> str:
+    """Prefer the local project version, then installed package metadata."""
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if pyproject_path.exists():
+        with pyproject_path.open("rb") as pyproject_file:
+            project = tomllib.load(pyproject_file).get("project", {})
+        project_version = project.get("version")
+        if isinstance(project_version, str) and project_version.strip():
+            return project_version
+
+    try:
+        return package_version("vidapi")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 def _parse_database_url(database_url: str) -> URL:
@@ -86,7 +104,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "VidAPI"
-    app_version: str = "0.1.33"
+    app_version: str = Field(default_factory=_default_app_version)
     debug: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     environment: Literal["development", "test", "production"] = "development"

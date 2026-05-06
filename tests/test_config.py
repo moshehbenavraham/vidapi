@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,10 +20,16 @@ VALID_API_KEY = "vidapi-config-test-key"
 VALID_API_KEY_HASH = hash_api_key(VALID_API_KEY)
 
 
+def _project_version() -> str:
+    with Path("pyproject.toml").open("rb") as pyproject_file:
+        project = tomllib.load(pyproject_file)["project"]
+    return str(project["version"])
+
+
 def test_default_settings_load() -> None:
     settings = Settings()
     assert settings.app_name == "VidAPI"
-    assert settings.app_version == "0.1.33"
+    assert settings.app_version == _project_version()
     assert settings.debug is False
     assert settings.log_level == "INFO"
     assert settings.max_fps == 60
@@ -43,9 +50,13 @@ def test_storage_root_default() -> None:
 
 
 def test_env_var_override() -> None:
-    with patch.dict(os.environ, {"APP_NAME": "TestAPI", "DEBUG": "true"}):
+    with patch.dict(
+        os.environ,
+        {"APP_NAME": "TestAPI", "APP_VERSION": "9.8.7", "DEBUG": "true"},
+    ):
         settings = Settings()
         assert settings.app_name == "TestAPI"
+        assert settings.app_version == "9.8.7"
         assert settings.debug is True
 
 
