@@ -34,11 +34,11 @@
 | `docs/adr/0000-template.md` | Current |
 | `docs/adr/0001-editly-as-mvp-renderer.md` | Current |
 | `docs/captions-and-posters.md` | Current |
-| `docs/final-plan.md` | Current |
 | `docs/hyperframes-renderer.md` | Current |
 | `docs/native-ffmpeg-renderer.md` | Current |
 | `docs/operations.md` | Current |
 | `docs/output-formats.md` | Current |
+| `docs/prev-specs/PRD_p00-p04.md` | Current |
 | `docs/renderer-capabilities.md` | Current |
 | `docs/runbooks/incident-response.md` | Current |
 | `docs/transitions.md` | Current |

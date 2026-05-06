@@ -35,6 +35,8 @@ data/
 .env
 .env.*
 !.env.example
+!.env.docker
+!.env.production.example
 
 # OS
 .DS_Store

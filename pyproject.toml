@@ -7,7 +7,7 @@ packages = ["app"]
 
 [project]
 name = "vidapi"
-version = "0.1.32"
+version = "0.1.33"
 description = "Self-hosted FastAPI service for programmatic video rendering"
 readme = "README.md"
 license = "MIT"

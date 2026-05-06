@@ -52,9 +52,9 @@ jobs:
           PY
           )
 
-          cat > .env.production.example <<EOF
+          cat > .env.production <<EOF
           APP_NAME=VidAPI
-          APP_VERSION=0.1.1
+          APP_VERSION=0.1.33
           ENVIRONMENT=production
           DEBUG=false
           LOG_LEVEL=INFO
@@ -95,14 +95,14 @@ jobs:
           EOF
 
       - name: Start production-like infrastructure
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d --build postgres redis minio
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build postgres redis minio
 
       - name: Wait for PostgreSQL
         run: |
           set -euo pipefail
 
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if docker compose --env-file .env.production.example -f docker-compose.prod.yml exec -T postgres pg_isready -U vidapi -d vidapi; then
+            if docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres pg_isready -U vidapi -d vidapi; then
               exit 0
             fi
             sleep 5
@@ -112,10 +112,10 @@ jobs:
           exit 1
 
       - name: Run database migrations
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml run --rm api alembic upgrade head
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml run --rm api alembic upgrade head
 
       - name: Start API service
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml up -d api
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml up -d api
 
       - name: Run lightweight smoke test
         run: |
@@ -186,8 +186,8 @@ jobs:
 
       - name: Collect logs on failure
         if: failure()
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml logs --no-color
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml logs --no-color
 
       - name: Tear down stack
         if: always()
-        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml down -v
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml down -v

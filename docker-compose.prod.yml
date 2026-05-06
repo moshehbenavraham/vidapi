@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.api
     user: "1000:1000"
     env_file:
-      - .env.production.example
+      - .env.production
     environment:
       API_HEALTH_URL: http://api:8000/v1/health
     ports:
@@ -35,7 +35,7 @@ services:
       dockerfile: Dockerfile.worker
     user: "1000:1000"
     env_file:
-      - .env.production.example
+      - .env.production
     environment:
       API_HEALTH_URL: http://api:8000/v1/health
     volumes:

@@ -1316,7 +1316,7 @@ This target proves the product loop without overbuilding templates, HTML renderi
 
 ## Source Carryforward
 
-This PRD carries forward the implementation-critical content from `docs/final-plan.md` and the prior draft PRD:
+This PRD carries forward the implementation-critical content from the deleted `docs/final-plan.md` and the prior draft PRD:
 
 - Product positioning, goals, non-goals, users, and use cases.
 - API contract and endpoint naming.
@@ -1334,4 +1334,4 @@ This PRD carries forward the implementation-critical content from `docs/final-pl
 - Implementation phases and first demo target.
 - Key risks, mitigations, assumptions, and resolved architecture decisions.
 
-After this PRD is reviewed, `docs/final-plan.md` can be deleted without losing architectural direction.
+`docs/final-plan.md` has been deleted without losing architectural direction.

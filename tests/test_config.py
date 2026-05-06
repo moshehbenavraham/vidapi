@@ -22,7 +22,7 @@ VALID_API_KEY_HASH = hash_api_key(VALID_API_KEY)
 def test_default_settings_load() -> None:
     settings = Settings()
     assert settings.app_name == "VidAPI"
-    assert settings.app_version == "0.1.3"
+    assert settings.app_version == "0.1.33"
     assert settings.debug is False
     assert settings.log_level == "INFO"
     assert settings.max_fps == 60
