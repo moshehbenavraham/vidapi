@@ -34,6 +34,17 @@ class TestTextRenderer:
         r, _g, _b, _a = img.getpixel((0, 0))
         assert r == 255
 
+    def test_css_rgba_background(self) -> None:
+        options = TextRenderOptions(
+            text="Test",
+            background="rgba(0,0,0,0.38)",
+            padding=4,
+        )
+        data = render_text_to_png(options)
+        img = Image.open(BytesIO(data))
+
+        assert img.getpixel((0, 0)) == (0, 0, 0, 97)
+
     def test_empty_text_returns_1x1_png(self) -> None:
         options = TextRenderOptions(text="")
         data = render_text_to_png(options)
@@ -75,6 +86,23 @@ class TestTextRenderer:
         img_pad = Image.open(BytesIO(data_pad))
         assert img_pad.width > img_no.width
         assert img_pad.height > img_no.height
+
+    def test_max_width_wraps_text(self) -> None:
+        natural = TextRenderOptions(
+            text="Large bottom left overlay text should wrap before the edge",
+            font_size=36,
+        )
+        wrapped = TextRenderOptions(
+            text=natural.text,
+            font_size=36,
+            max_width=220,
+        )
+
+        natural_img = Image.open(BytesIO(render_text_to_png(natural)))
+        wrapped_img = Image.open(BytesIO(render_text_to_png(wrapped)))
+
+        assert wrapped_img.width <= 220
+        assert wrapped_img.height > natural_img.height
 
     def test_font_fallback_still_renders(self) -> None:
         options = TextRenderOptions(

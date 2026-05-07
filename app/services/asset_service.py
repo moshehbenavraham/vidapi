@@ -77,6 +77,7 @@ class AssetService:
         src: str,
         *,
         text_asset: TextAsset | None = None,
+        text_max_width: int | None = None,
         workspace: Path | None = None,
     ) -> ResolvedAsset:
         """Resolve an asset reference to a validated local file.
@@ -87,7 +88,11 @@ class AssetService:
         - ``http(s)://`` -> download with full validation
         """
         if text_asset is not None:
-            return await self._resolve_text(text_asset, workspace)
+            return await self._resolve_text(
+                text_asset,
+                workspace,
+                max_width=text_max_width,
+            )
 
         parsed = urlparse(src)
 
@@ -323,6 +328,8 @@ class AssetService:
         self,
         text_asset: TextAsset,
         workspace: Path | None,
+        *,
+        max_width: int | None = None,
     ) -> ResolvedAsset:
         options = TextRenderOptions(
             text=text_asset.text,
@@ -333,6 +340,7 @@ class AssetService:
             padding=text_asset.padding,
             line_height=text_asset.line_height,
             align=text_asset.align,
+            max_width=max_width,
         )
         png_data = await asyncio.to_thread(
             render_text_to_png,

@@ -39,6 +39,7 @@ from app.renderers.capabilities import (
     RendererCapabilityError,
     validate_renderer_capabilities,
 )
+from app.renderers.position import POSITION_MARGIN, resolve_position
 from app.renderers.poster import PosterError, generate_poster, resolve_poster_plan
 from app.renderers.timeline import asset_resolver_key
 from app.services.asset_service import AssetService
@@ -584,10 +585,17 @@ class RenderService:
     ) -> dict[str, str]:
         """Walk all clips and resolve asset sources to local paths."""
         asset_map: dict[str, str] = {}
+        output_width = composition.output.width or 1920
+        output_height = composition.output.height or 1080
 
         for track in composition.timeline.tracks:
             for clip in track.clips:
-                for resolved in await self._resolve_clip_assets(clip, workspace):
+                for resolved in await self._resolve_clip_assets(
+                    clip,
+                    workspace,
+                    output_width=output_width,
+                    output_height=output_height,
+                ):
                     src, local_path = resolved
                     asset_map[src] = local_path
 
@@ -604,6 +612,9 @@ class RenderService:
         self,
         clip: Clip,
         workspace: Path,
+        *,
+        output_width: int,
+        output_height: int,
     ) -> list[tuple[str, str]]:
         """Resolve a single clip's asset refs, returning (src, local_path) pairs."""
         asset = clip.asset
@@ -616,7 +627,14 @@ class RenderService:
 
         if isinstance(asset, TextAsset):
             resolved = await self._asset_service.resolve_asset(
-                "", text_asset=asset, workspace=workspace
+                "",
+                text_asset=asset,
+                text_max_width=_text_safe_max_width(
+                    clip,
+                    output_width=output_width,
+                    output_height=output_height,
+                ),
+                workspace=workspace,
             )
             return [(asset_resolver_key(clip) or "", str(resolved.local_path))]
 
@@ -782,3 +800,31 @@ class RenderService:
 
         if kwargs:
             await render_crud.update_render_paths(session, render_id, **kwargs)
+
+
+def _text_safe_max_width(
+    clip: Clip,
+    *,
+    output_width: int,
+    output_height: int,
+) -> int:
+    position = resolve_position(
+        clip.position,
+        clip.offset,
+        output_width=output_width,
+        output_height=output_height,
+    )
+    x = float(position["x"])
+    origin_x = str(position["originX"])
+    safe_left = POSITION_MARGIN
+    safe_right = 1.0 - POSITION_MARGIN
+
+    if origin_x == "right":
+        available = (x - safe_left) * output_width
+    elif origin_x == "center":
+        available = 2 * min(x - safe_left, safe_right - x) * output_width
+    else:
+        available = (safe_right - x) * output_width
+
+    scale = clip.scale if clip.scale > 0 else 1.0
+    return max(1, round(max(1.0, available) / scale))

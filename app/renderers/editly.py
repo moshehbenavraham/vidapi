@@ -5,7 +5,7 @@ import contextlib
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -46,6 +46,7 @@ from app.renderers.transitions import (
     transition_plan_by_boundary,
 )
 from app.services.audio_mixer import AudioMixError, AudioMixPlan, AudioSource, mix_audio
+from app.services.ffprobe import FFProbeError, probe
 
 logger = structlog.get_logger(__name__)
 
@@ -1014,12 +1015,16 @@ class EditlyRenderer:
         if compiled.audio_mix_plan is None or compiled.audio_mix_plan.is_empty:
             return output_path
 
+        audio_plan = await self._audio_plan_for_rendered_output(
+            compiled.audio_mix_plan,
+            output_path,
+        )
         mixed_path = output_path.with_suffix(".mixed.mp4")
         try:
             await mix_audio(
                 output_path,
                 mixed_path,
-                compiled.audio_mix_plan,
+                audio_plan,
                 settings=self._settings,
             )
             output_path.unlink(missing_ok=True)
@@ -1029,6 +1034,28 @@ class EditlyRenderer:
         except AudioMixError:
             mixed_path.unlink(missing_ok=True)
             raise
+
+    async def _audio_plan_for_rendered_output(
+        self,
+        audio_plan: AudioMixPlan,
+        output_path: Path,
+    ) -> AudioMixPlan:
+        try:
+            media_info = await probe(
+                output_path,
+                ffprobe_bin=self._settings.ffprobe_bin,
+                timeout_seconds=self._settings.ffprobe_timeout_seconds,
+                kill_grace_seconds=self._settings.subprocess_kill_grace_seconds,
+            )
+        except FFProbeError as exc:
+            logger.warning(
+                "audio_mix_probe_failed",
+                output=str(output_path),
+                error=str(exc),
+            )
+            return audio_plan
+
+        return replace(audio_plan, video_has_audio=media_info.audio_codec is not None)
 
     async def _stream_stderr(
         self,

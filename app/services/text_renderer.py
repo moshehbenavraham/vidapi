@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,14 @@ from PIL import Image, ImageDraw, ImageFont
 logger = structlog.get_logger(__name__)
 
 _FONT_CACHE: dict[tuple[str, int], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
+_CSS_RGB_PATTERN = re.compile(
+    r"(?i)^rgba?\(\s*"
+    r"(?P<r>\d{1,3})\s*,\s*"
+    r"(?P<g>\d{1,3})\s*,\s*"
+    r"(?P<b>\d{1,3})"
+    r"(?:\s*,\s*(?P<a>[0-9]*\.?[0-9]+%?))?"
+    r"\s*\)$"
+)
 
 _FONT_FAMILY_MAP: dict[str, list[str]] = {
     "inter": [
@@ -42,6 +51,7 @@ class TextRenderOptions:
     padding: int = 0
     line_height: float = 1.2
     align: Literal["left", "center", "right"] = "center"
+    max_width: int | None = None
 
 
 def render_text_to_png(
@@ -61,18 +71,25 @@ def render_text_to_png(
         font_search_paths or [],
     )
 
-    line_spacing = max(1, round(options.font_size * options.line_height))
-    lines = options.text.split("\n")
-
     dummy_img = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(dummy_img)
+
+    max_text_width: int | None = None
+    padding = options.padding
+    if options.max_width is not None:
+        max_width = max(1, options.max_width)
+        padding = min(padding, max((max_width - 1) // 2, 0))
+        max_text_width = max(1, max_width - padding * 2)
+
+    line_spacing = max(1, round(options.font_size * options.line_height))
+    lines = _wrap_lines(options.text.split("\n"), draw, font, max_text_width)
 
     line_bboxes: list[tuple[int, int, int, int]] = []
     line_widths: list[int] = []
     line_heights: list[int] = []
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
-        line_bboxes.append(tuple(int(v) for v in bbox))
+        line_bboxes.append((int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])))
         line_widths.append(max(0, int(bbox[2] - bbox[0])))
         bbox_height = max(0, int(bbox[3] - bbox[1]))
         line_heights.append(max(line_spacing, bbox_height, 1))
@@ -80,36 +97,133 @@ def render_text_to_png(
     text_width = max(line_widths) if line_widths else 0
     text_height = sum(line_heights)
 
-    img_width = text_width + options.padding * 2
-    img_height = text_height + options.padding * 2
+    img_width = text_width + padding * 2
+    img_height = text_height + padding * 2
 
     img_width = max(img_width, 1)
     img_height = max(img_height, 1)
 
     if options.background:
-        img = Image.new("RGBA", (img_width, img_height), options.background)
+        img = Image.new(
+            "RGBA",
+            (img_width, img_height),
+            _parse_color(options.background),
+        )
     else:
         img = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
 
     draw = ImageDraw.Draw(img)
 
-    y = options.padding
+    text_color = _parse_color(options.color)
+    y = padding
     for i, (line, bbox) in enumerate(zip(lines, line_bboxes, strict=True)):
         bbox_left, bbox_top, _bbox_right, _bbox_bottom = bbox
-        line_left = options.padding
+        line_left = padding
         if options.align == "center":
-            line_left = options.padding + (text_width - line_widths[i]) // 2
+            line_left = padding + (text_width - line_widths[i]) // 2
         elif options.align == "right":
-            line_left = options.padding + text_width - line_widths[i]
+            line_left = padding + text_width - line_widths[i]
 
         x = line_left - bbox_left
         draw_y = y - bbox_top
-        draw.text((x, draw_y), line, fill=options.color, font=font)
+        draw.text((x, draw_y), line, fill=text_color, font=font)
         y += line_heights[i]
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _wrap_lines(
+    raw_lines: list[str],
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int | None,
+) -> list[str]:
+    if max_width is None:
+        return raw_lines
+
+    wrapped: list[str] = []
+    for raw_line in raw_lines:
+        if not raw_line:
+            wrapped.append(raw_line)
+            continue
+
+        current = ""
+        for word in raw_line.split():
+            candidate = word if not current else f"{current} {word}"
+            if _text_width(draw, candidate, font) <= max_width:
+                current = candidate
+                continue
+
+            if current:
+                wrapped.append(current)
+                current = ""
+
+            if _text_width(draw, word, font) <= max_width:
+                current = word
+                continue
+
+            chunks = _break_long_word(word, draw, font, max_width)
+            wrapped.extend(chunks[:-1])
+            current = chunks[-1] if chunks else ""
+
+        wrapped.append(current)
+
+    return wrapped
+
+
+def _break_long_word(
+    word: str,
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for char in word:
+        candidate = current + char
+        if not current or _text_width(draw, candidate, font) <= max_width:
+            current = candidate
+            continue
+        chunks.append(current)
+        current = char
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _text_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return max(0, int(bbox[2] - bbox[0]))
+
+
+def _parse_color(value: str) -> str | tuple[int, int, int, int]:
+    match = _CSS_RGB_PATTERN.fullmatch(value.strip())
+    if match is None:
+        return value
+
+    red = _clamp_channel(match.group("r"))
+    green = _clamp_channel(match.group("g"))
+    blue = _clamp_channel(match.group("b"))
+    alpha_raw = match.group("a")
+    if alpha_raw is None:
+        alpha = 255
+    elif alpha_raw.endswith("%"):
+        alpha = round(float(alpha_raw[:-1]) * 2.55)
+    else:
+        alpha_value = float(alpha_raw)
+        alpha = round(alpha_value * 255) if alpha_value <= 1.0 else round(alpha_value)
+
+    return red, green, blue, max(0, min(255, alpha))
+
+
+def _clamp_channel(value: str) -> int:
+    return max(0, min(255, int(value)))
 
 
 def _empty_png() -> bytes:

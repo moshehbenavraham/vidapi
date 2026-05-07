@@ -20,7 +20,7 @@ from app.models.composition import (
     Track,
     VideoAsset,
 )
-from app.renderers.base import CompileError
+from app.renderers.base import CompiledRender, CompileError
 from app.renderers.editly import (
     ActiveClip,
     EditlyRenderer,
@@ -38,6 +38,8 @@ from app.renderers.editly import (
     serialize_spec,
     spec_duration_seconds,
 )
+from app.services.audio_mixer import AudioMixPlan, AudioSource
+from app.services.ffprobe import MediaInfo
 
 # ---------------------------------------------------------------------------
 # Layer Mapper Unit Tests
@@ -938,3 +940,51 @@ class TestEditlyRendererCompileWithAudio:
 
         assert result.audio_mix_plan is not None
         assert result.audio_mix_plan.is_empty is True
+
+    async def test_post_process_audio_detects_video_without_audio(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        renderer = EditlyRenderer()
+        output_path = tmp_path / "render.mp4"
+        output_path.write_bytes(b"video")
+        compiled = CompiledRender(
+            spec_path=tmp_path / "compiled.editly.json",
+            replay_path=tmp_path / "replay.json",
+            workspace=tmp_path,
+            renderer_name="editly",
+            spec_json="{}",
+            audio_mix_plan=AudioMixPlan(sources=[AudioSource(path="/sfx.mp3")]),
+        )
+        captured: dict[str, AudioMixPlan] = {}
+
+        async def fake_probe(*args: object, **kwargs: object) -> MediaInfo:
+            return MediaInfo(
+                duration=1.0,
+                width=320,
+                height=180,
+                video_codec="h264",
+                audio_codec=None,
+                stream_count=1,
+                format_name="mov,mp4,m4a,3gp,3g2,mj2",
+            )
+
+        async def fake_mix_audio(
+            video_path: Path,
+            mixed_path: Path,
+            plan: AudioMixPlan,
+            **kwargs: object,
+        ) -> Path:
+            captured["plan"] = plan
+            mixed_path.write_bytes(video_path.read_bytes() + b"+audio")
+            return mixed_path
+
+        monkeypatch.setattr("app.renderers.editly.probe", fake_probe)
+        monkeypatch.setattr("app.renderers.editly.mix_audio", fake_mix_audio)
+
+        result = await renderer.post_process_audio(compiled, output_path)
+
+        assert result == output_path
+        assert captured["plan"].video_has_audio is False
+        assert output_path.read_bytes() == b"video+audio"
