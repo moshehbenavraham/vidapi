@@ -285,6 +285,18 @@ S3_FORCE_PATH_STYLE=true
 Create the bucket before rendering if your MinIO instance does not auto-create
 it through external provisioning.
 
+### Logs in This Environment
+
+- Live API and worker logs are Docker stdout/stderr:
+  `sg docker -c "docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.vps.yml logs -f --tail=200 api worker"`.
+- Durable per-render logs are stored as `logs.txt`. In this VPS stack, MinIO
+  stores them at `s3://vidapi-renders/renders/<render_id>/logs.txt`; fetch them
+  through `GET /v1/renders/<render_id>/artifacts/logs.txt` or the `logs` alias.
+- Failed render scratch diagnostics are preserved in the worker container at
+  `/app/data/renders/<render_id>/logs.txt`. Successful render workspaces are
+  cleaned after artifacts are published.
+- The repo-level `logs/` directory is not used for runtime logs.
+
 ## Operational Visibility
 
 Authenticated operators can inspect the stack through `/v1/ops`:
