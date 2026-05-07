@@ -121,7 +121,19 @@ class TestSSRFDNSResolution:
 class TestAssetMIMEAllowlist:
     """MIME validation in asset service."""
 
-    def test_mime_check_accepts_allowed_type(self) -> None:
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "image/png",
+            "audio/mp4",
+            "audio/x-m4a",
+            "audio/x-wav",
+            "audio/webm",
+            "application/ogg",
+            "audio/x-flac",
+        ],
+    )
+    def test_mime_check_accepts_allowed_type(self, content_type: str) -> None:
         from unittest.mock import MagicMock
 
         import httpx
@@ -133,10 +145,10 @@ class TestAssetMIMEAllowlist:
         svc = AssetService(settings=settings)
 
         response = MagicMock(spec=httpx.Response)
-        response.headers = {"content-type": "image/png"}
+        response.headers = {"content-type": content_type}
         response.content = b"\x89PNG" + b"\x00" * 100
 
-        data = svc._validate_response(response, "https://example.com/img.png")
+        data = svc._validate_response(response, "https://example.com/asset")
         assert data == response.content
 
     def test_mime_check_rejects_disallowed_type(self) -> None:

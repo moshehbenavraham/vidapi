@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -48,6 +49,22 @@ class TestTextRenderer:
         img_single = Image.open(BytesIO(data_single))
         img_multi = Image.open(BytesIO(data_multi))
         assert img_multi.height > img_single.height
+
+    def test_small_line_height_does_not_clip_glyph_bounds(self) -> None:
+        font_dir = Path("/usr/share/fonts/truetype/dejavu")
+        if not (font_dir / "DejaVuSans.ttf").is_file():
+            pytest.skip("DejaVu Sans test font is not installed")
+
+        options = TextRenderOptions(
+            text="Ågjpqy",
+            font_family="DejaVu Sans",
+            font_size=48,
+            line_height=0.1,
+        )
+        data = render_text_to_png(options, font_search_paths=[str(font_dir)])
+        img = Image.open(BytesIO(data))
+
+        assert img.height >= 50
 
     def test_padding_increases_dimensions(self) -> None:
         no_pad = TextRenderOptions(text="Test", padding=0)

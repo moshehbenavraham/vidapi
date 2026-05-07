@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import tomllib
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
@@ -216,11 +217,23 @@ class Settings(BaseSettings):
         "video/mp4",
         "video/webm",
         "video/quicktime",
+        "audio/mp3",
         "audio/mpeg",
+        "audio/mp4",
+        "audio/m4a",
+        "audio/x-m4a",
         "audio/wav",
+        "audio/wave",
+        "audio/x-wav",
+        "audio/vnd.wave",
+        "audio/webm",
         "audio/ogg",
+        "audio/oga",
+        "application/ogg",
         "audio/aac",
+        "audio/x-aac",
         "audio/flac",
+        "audio/x-flac",
     ]
     font_search_paths: list[str] = [
         "/usr/share/fonts/opentype/inter",

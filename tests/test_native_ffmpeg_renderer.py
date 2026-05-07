@@ -167,6 +167,43 @@ def test_native_plan_supports_text_png_and_audio_mix_filters(tmp_path: Path) -> 
     assert "amix=inputs=2" in plan.filter_complex
 
 
+def test_native_text_overlay_preserves_png_dimensions(tmp_path: Path) -> None:
+    composition = Composition.model_validate(
+        {
+            "renderer": "ffmpeg-native",
+            "timeline": {
+                "background": "#000000",
+                "tracks": [
+                    {
+                        "clips": [
+                            {
+                                "asset": {"type": "text", "text": "Hello"},
+                                "length": 1.0,
+                            }
+                        ]
+                    }
+                ],
+            },
+            "output": {"format": "mp4", "width": 320, "height": 180, "fps": 24},
+        }
+    )
+    resolver = _resolver(tmp_path, composition)
+
+    plan = build_native_render_plan(
+        composition,
+        tmp_path / "out.mp4",
+        asset_path_resolver=resolver,
+        ffmpeg_bin="ffmpeg",
+    )
+
+    assert plan.visual_layers[0].asset_type == "text"
+    assert "[0:v]trim=duration=1.000000,setpts=PTS-STARTPTS,format=rgba" in (
+        plan.filter_complex
+    )
+    assert "scale=320:180" not in plan.filter_complex
+    assert "crop=320:180" not in plan.filter_complex
+
+
 @pytest.mark.asyncio
 async def test_native_compile_writes_compiled_and_replay_json(tmp_path: Path) -> None:
     composition = _load_native_fixture()

@@ -61,19 +61,24 @@ def render_text_to_png(
         font_search_paths or [],
     )
 
-    line_spacing = int(options.font_size * options.line_height)
+    line_spacing = max(1, round(options.font_size * options.line_height))
     lines = options.text.split("\n")
 
     dummy_img = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(dummy_img)
 
+    line_bboxes: list[tuple[int, int, int, int]] = []
     line_widths: list[int] = []
+    line_heights: list[int] = []
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
-        line_widths.append(int(bbox[2] - bbox[0]))
+        line_bboxes.append(tuple(int(v) for v in bbox))
+        line_widths.append(max(0, int(bbox[2] - bbox[0])))
+        bbox_height = max(0, int(bbox[3] - bbox[1]))
+        line_heights.append(max(line_spacing, bbox_height, 1))
 
     text_width = max(line_widths) if line_widths else 0
-    text_height = line_spacing * len(lines)
+    text_height = sum(line_heights)
 
     img_width = text_width + options.padding * 2
     img_height = text_height + options.padding * 2
@@ -89,15 +94,18 @@ def render_text_to_png(
     draw = ImageDraw.Draw(img)
 
     y = options.padding
-    for i, line in enumerate(lines):
-        x = options.padding
+    for i, (line, bbox) in enumerate(zip(lines, line_bboxes, strict=True)):
+        bbox_left, bbox_top, _bbox_right, _bbox_bottom = bbox
+        line_left = options.padding
         if options.align == "center":
-            x = (img_width - line_widths[i]) // 2
+            line_left = options.padding + (text_width - line_widths[i]) // 2
         elif options.align == "right":
-            x = img_width - line_widths[i] - options.padding
+            line_left = options.padding + text_width - line_widths[i]
 
-        draw.text((x, y), line, fill=options.color, font=font)
-        y += line_spacing
+        x = line_left - bbox_left
+        draw_y = y - bbox_top
+        draw.text((x, draw_y), line, fill=options.color, font=font)
+        y += line_heights[i]
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

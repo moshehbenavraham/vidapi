@@ -5,8 +5,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
-from app.db.time import utcnow_naive
 from app.db.template_models import Template, TemplateVersion
+from app.db.time import utcnow_naive
 
 
 async def _commit_and_refresh(session: AsyncSession, *instances: object) -> None:

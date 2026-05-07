@@ -669,7 +669,10 @@ def _visual_layer_filter(
     if layer.input_index is None:
         chain.append("setpts=PTS-STARTPTS")
     chain.append(f"setpts=PTS-STARTPTS+{layer.start:.6f}/TB")
-    return f"{source},{','.join(chain)}[{label}]"
+    filters = ",".join(chain)
+    if layer.input_index is None:
+        return f"{source},{filters}[{label}]"
+    return f"{source}{filters}[{label}]"
 
 
 def _audio_layer_filter(
@@ -694,6 +697,16 @@ def _audio_layer_filter(
 
 
 def _fit_filters(layer: NativeVisualLayer, *, width: int, height: int) -> list[str]:
+    if layer.asset_type == "text":
+        if abs(layer.scale - 1.0) <= EPSILON:
+            return []
+        return [
+            (
+                f"scale=iw*{layer.scale:.6f}:ih*{layer.scale:.6f}:"
+                "eval=init"
+            )
+        ]
+
     target_width = _target_width(layer, width)
     target_height = _target_height(layer, height)
     if layer.fit is FitMode.COVER:

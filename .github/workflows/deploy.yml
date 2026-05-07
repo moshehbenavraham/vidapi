@@ -54,7 +54,7 @@ jobs:
 
           cat > .env.production <<EOF
           APP_NAME=VidAPI
-          APP_VERSION=0.1.33
+          APP_VERSION=0.1.37
           ENVIRONMENT=production
           DEBUG=false
           LOG_LEVEL=INFO
