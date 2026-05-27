@@ -57,6 +57,11 @@ def _redis_log_fields(redis_url: str) -> dict[str, Any]:
     }
 
 
+def _request_scope_path(request: Request) -> str:
+    path = request.scope.get("path")
+    return path if isinstance(path, str) else ""
+
+
 async def _prepare_database() -> None:
     settings = get_settings()
     try:
@@ -145,7 +150,7 @@ def create_app() -> FastAPI:
                 **build_request_log_fields(
                     request_id=request_id,
                     method=request.method,
-                    path=request.url.path,
+                    path=_request_scope_path(request),
                     status_code=500,
                     duration_ms=duration_ms,
                 ),
@@ -160,7 +165,7 @@ def create_app() -> FastAPI:
             **build_request_log_fields(
                 request_id=request_id,
                 method=request.method,
-                path=request.url.path,
+                path=_request_scope_path(request),
                 status_code=response.status_code,
                 duration_ms=duration_ms,
             ),

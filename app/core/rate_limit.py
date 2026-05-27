@@ -17,6 +17,11 @@ _MAX_CLIENT_KEY_LENGTH = 128
 _MAX_FORWARDED_FOR_LENGTH = 512
 
 
+def _request_scope_path(request: Request) -> str:
+    path = request.scope.get("path")
+    return path if isinstance(path, str) else ""
+
+
 def _parse_rate(rate_str: str) -> tuple[int, int]:
     """Parse rate string like '60/minute' into (count, window_seconds)."""
     count_str, period = rate_str.split("/")
@@ -79,7 +84,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        path = request.url.path
+        path = _request_scope_path(request)
         if path.rstrip("/") in _EXEMPT_PATHS:
             return await call_next(request)
 
