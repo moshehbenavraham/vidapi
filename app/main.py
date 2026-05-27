@@ -101,7 +101,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RateLimitMiddleware)
 
     allow_credentials = "*" not in settings.cors_origins
@@ -112,6 +111,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     @app.middleware("http")
     async def request_id_middleware(
@@ -131,7 +131,7 @@ def create_app() -> FastAPI:
                 **build_request_log_fields(
                     request_id=request_id,
                     method=request.method,
-                    path=request.url.path,
+                    path=str(request.scope.get("path", "")),
                     status_code=500,
                     duration_ms=duration_ms,
                 ),
@@ -146,7 +146,7 @@ def create_app() -> FastAPI:
             **build_request_log_fields(
                 request_id=request_id,
                 method=request.method,
-                path=request.url.path,
+                path=str(request.scope.get("path", "")),
                 status_code=response.status_code,
                 duration_ms=duration_ms,
             ),

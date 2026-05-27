@@ -108,6 +108,17 @@ async def test_untrusted_host_is_rejected(client: AsyncClient) -> None:
     assert response.text == "Invalid host header"
 
 
+@pytest.mark.asyncio
+async def test_malformed_host_header_is_rejected(client: AsyncClient) -> None:
+    response = await client.get(
+        "/v1/renders",
+        headers={"host": "test/health?x="},
+    )
+
+    assert response.status_code == 400
+    assert response.text == "Invalid host header"
+
+
 def test_production_cors_wildcard_rejected() -> None:
     with pytest.raises(ValueError, match="Wildcard CORS"):
         Settings(cors_origins=["*"], debug=False)

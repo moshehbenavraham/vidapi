@@ -79,7 +79,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        path = request.url.path
+        path = str(request.scope.get("path", ""))
         if path.rstrip("/") in _EXEMPT_PATHS:
             return await call_next(request)
 
