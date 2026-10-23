@@ -111,6 +111,25 @@ jobs:
           echo "PostgreSQL did not become ready within 60 seconds" >&2
           exit 1
 
+      - name: Create S3 bucket
+        run: |
+          set -euo pipefail
+
+          # The app never creates its bucket, so a fresh MinIO/Silo volume made
+          # every POST /v1/renders fail with a 500 (NoSuchBucket).
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if docker compose --env-file .env.production -f docker-compose.prod.yml exec -T minio \
+              sh -c 'mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null && mc ready local >/dev/null'; then
+              docker compose --env-file .env.production -f docker-compose.prod.yml exec -T minio \
+                mc mb --ignore-existing local/vidapi-renders
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Object storage did not become ready within 60 seconds" >&2
+          exit 1
+
       - name: Run database migrations
         run: docker compose --env-file .env.production -f docker-compose.prod.yml run --rm api alembic upgrade head
 
