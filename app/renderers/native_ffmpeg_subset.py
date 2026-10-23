@@ -700,12 +700,7 @@ def _fit_filters(layer: NativeVisualLayer, *, width: int, height: int) -> list[s
     if layer.asset_type == "text":
         if abs(layer.scale - 1.0) <= EPSILON:
             return []
-        return [
-            (
-                f"scale=iw*{layer.scale:.6f}:ih*{layer.scale:.6f}:"
-                "eval=init"
-            )
-        ]
+        return [(f"scale=iw*{layer.scale:.6f}:ih*{layer.scale:.6f}:eval=init")]
 
     target_width = _target_width(layer, width)
     target_height = _target_height(layer, height)
