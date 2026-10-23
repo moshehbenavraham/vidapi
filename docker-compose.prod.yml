@@ -104,8 +104,8 @@ services:
   minio:
     # MinIO stopped publishing minio/minio (Docker Hub) and quay.io/minio/minio now
     # requires auth. pgsty/silo is the drop-in community fork (same MINIO_* env,
-    # /minio/* routes, data layout); keep this tag pinned.
-    image: docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    # /minio/* routes, data layout); keep this tag and digest pinned.
+    image: docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vidapi-minio}
