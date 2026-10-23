@@ -92,7 +92,7 @@ docker run --rm \
   -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=vidapi \
   -e MINIO_ROOT_PASSWORD=vidapi-secret \
-  quay.io/minio/minio server /data --console-address ":9001"
+  docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7 server /data --console-address ":9001"
 ```
 
 Create a `vidapi-renders` bucket in the MinIO console, then run API and worker

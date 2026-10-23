@@ -52,7 +52,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --dev --frozen
+        run: uv sync --extra dev --frozen
 
       - name: Run PostgreSQL migration smoke test
         run: bash scripts/postgres-migration-smoke.sh
