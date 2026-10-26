@@ -1,4 +1,4 @@
-FROM node:24-slim AS node-base
+FROM node:26-slim AS node-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 
