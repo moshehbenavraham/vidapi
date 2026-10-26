@@ -8,6 +8,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Stay on even-numbered Node LTS majors; odd majors are short-lived and go EOL fast (PR #11).
+      - dependency-name: node
+        versions: [">=25, <26", ">=27, <28", ">=29, <30"]
   - package-ecosystem: docker-compose
     directory: /
     schedule:

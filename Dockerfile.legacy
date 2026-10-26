@@ -1,4 +1,4 @@
-FROM node:25-slim AS node-base
+FROM node:24-slim AS node-base
 
 RUN npm install -g editly
 
