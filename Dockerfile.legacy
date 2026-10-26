@@ -3,7 +3,7 @@ FROM node:24-slim AS node-base
 RUN npm install -g editly
 
 
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
