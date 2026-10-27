@@ -12,6 +12,10 @@ updates:
       # Stay on even-numbered Node LTS majors; odd majors are short-lived and go EOL fast (PR #11).
       - dependency-name: node
         versions: [">=25, <26", ">=27, <28", ">=29, <30"]
+      # Keep worker/legacy on node:24-slim until a deliberate verified upgrade.
+      # editly→gl has no Node 26+ prebuild and node-gyp fails on the slim image (closed #12).
+      - dependency-name: node
+        versions: [">=26"]
   - package-ecosystem: docker-compose
     directory: /
     schedule:
