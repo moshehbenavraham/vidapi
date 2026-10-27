@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g editly hyperframes
 
 
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
